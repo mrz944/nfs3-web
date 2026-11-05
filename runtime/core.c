@@ -18,8 +18,10 @@ static pthread_mutex_t log_mu = PTHREAD_MUTEX_INITIALIZER;
 void rt_log(const char *fmt, ...) {
     if (!rt_verbose) return;
     va_list ap; va_start(ap, fmt);
+    static struct timespec t0; struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
     pthread_mutex_lock(&log_mu);
-    fputs("[rt] ", stderr); vfprintf(stderr, fmt, ap); fputc('\n', stderr);
+    if (!t0.tv_sec) t0 = t;
+    fprintf(stderr, "[rt %7.3f] ", (double)(t.tv_sec - t0.tv_sec) + (t.tv_nsec - t0.tv_nsec) * 1e-9); vfprintf(stderr, fmt, ap); fputc('\n', stderr);
     pthread_mutex_unlock(&log_mu);
     va_end(ap);
 }
@@ -172,6 +174,12 @@ void trace_enter(CPU *c, uint32_t fn) {
     char a[4][64];
     fmt_arg(c->r[EAX], a[0], 64); fmt_arg(c->r[EDX], a[1], 64); fmt_arg(c->r[EBX], a[2], 64); fmt_arg(c->r[ECX], a[3], 64);
     rt_log("-> %08x(eax=%s edx=%s ebx=%s ecx=%s) [ret %08x]", fn, a[0], a[1], a[2], a[3], RD32(c->r[ESP]));
+    if (getenv("RT_PEEK")) {           /* RT_PEEK=hexaddr:len : dump guest memory at each traced entry */
+        uint32_t pa = 0, pl = 32; sscanf(getenv("RT_PEEK"), "%x:%u", &pa, &pl); if (pl > 256) pl = 256;
+        char h[1024]; int k = 0;
+        for (uint32_t i = 0; i < pl; i++) k += snprintf(h + k, sizeof h - k, "%02x%s", G[pa + i], (i & 3) == 3 ? " " : "");
+        rt_log("   [%#x] %s", pa, h);
+    }
     if (getenv("RT_TRACE_DUMP") && c->r[EAX] >= 0x10000) {
         char h[128]; int k = 0;
         for (int i = 0; i < 32; i++) k += snprintf(h + k, sizeof h - k, "%02x%s", G[c->r[EAX] + i], (i & 3) == 3 ? " " : "");

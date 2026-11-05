@@ -333,7 +333,7 @@ GL_(VertexLayout) {
 static void draw3(uint32_t pa, uint32_t pb, uint32_t pc) {
     GVert v[3];
     static int dumped;
-    if (rt_verbose && dumped < 6) {
+    if (rt_verbose > 2 && dumped < 6) {
         dumped++;
         char h[400]; int k = 0;
         for (int i = 0; i < 64; i += 4) { uint32_t w = RD32(pa + (uint32_t)i); k += snprintf(h + k, sizeof h - k, "%08x(%g) ", w, (double)F(w)); }

@@ -45,7 +45,8 @@ void gpu_headless_frame(GFrame *unused) {
     static uint8_t px[640 * 480 * 4];
     glBindFramebuffer(GL_FRAMEBUFFER, fb);
     glReadPixels(0, 0, 640, 480, GL_RGBA, GL_UNSIGNED_BYTE, px);
-    char path[64]; snprintf(path, sizeof path, "build/frames/g%05d.ppm", n);
+    const char *dir = getenv("RT_DUMP_DIR") ? getenv("RT_DUMP_DIR") : "build/frames";
+    char path[512]; snprintf(path, sizeof path, "%s/g%06d.ppm", dir, n);
     FILE *f = fopen(path, "wb"); if (!f) return;
     fprintf(f, "P6\n640 480\n255\n");
     for (int y = 479; y >= 0; y--) for (int x = 0; x < 640; x++) fwrite(px + (y * 640 + x) * 4, 1, 3, f);

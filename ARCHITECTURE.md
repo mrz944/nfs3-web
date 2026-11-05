@@ -86,3 +86,30 @@ The native Linux build of the recompiled game reaches the intro animation and th
 - Debugging: `RT_TRACE=<hex,...>` (lifted-function entry/return with Watcom
   register args), `RT_TRACE_DUMP=1`, `RT_VERBOSE=2|3`, `RT_ALARM=<s>` under gdb,
   and `./re <pe> dis|xref|func|str|export`.
+
+## Online play (2026-11-05)
+
+NFS3's **IPX** mode (LAN game browser) is used for online play. The game's own
+netcode is host-relayed lockstep. Every ~31 ms (32 Hz) each client sends its
+controller input (≈16-byte packet) to the host. The host bundles all players'
+inputs (≈43 bytes) and sends the bundle to everyone, and every machine
+simulates all cars from those inputs. The host's own input therefore takes
+effect at once, while a client's input needs one round trip to the host. That
+is why clients lagged on 1999-era internet links. Packets are tagged `0xEA` +
+`add`/`rsp`/`dat`/`ola`; `dat` packets carry the game's own sequence/ack bytes.
+
+- `runtime/net.c`: WSOCK32 IPX sockets (`AF_IPX`, `SOCK_DGRAM`) on a virtual
+  LAN. The 6-byte node address comes from the relay, broadcasts go to the whole
+  room, and SAP (socket 0x452) handles game discovery. TCP/IP mode is refused.
+- `web/relay.mjs` (mounted at `/net` by `serve.mjs`): rooms, node ids, WebRTC
+  signalling and packet relay. There's also a raw TCP or Unix-socket endpoint
+  for native test builds (`--relay-tcp PORT|PATH`, `RT_NET=unix:PATH`).
+- `web/net.js`: browsers open WebRTC data channels to every room member
+  (unordered, `maxPacketLifeTime` 150 ms) and fall back to the relay.
+- Runtime fixes that online play needed: `GetSystemMetrics(SM_NETWORK)` must
+  be 1 (otherwise every network option is greyed out); `closesocket` must wake
+  threads blocked in `recvfrom`/`select`; `WaitForMultipleObjects(bWaitAll)`
+  must not consume auto-reset events early (this also fixed an occasional
+  start-up hang).
+- Test: `tools/nettest.sh` runs two headless native instances in one room.
+  Verified: lobby discovery, join, and a 2-player race with synchronised timers.

@@ -26,6 +26,15 @@
   #fps { position: fixed; right: 10px; bottom: 8px; color: #fff9; font: 12px ui-monospace, monospace; pointer-events: none; }
   #hint { position: fixed; left: 12px; bottom: 8px; color: #fff8; font-size: 12px; pointer-events: none; }
   input[type=file] { display: none; }
+  #online { margin-top: 20px; padding-top: 16px; border-top: 1px solid #2a3040; }
+  #online h2 { font-size: 16px; margin: 0 0 4px; }
+  #online input { background: #0b0d12; color: var(--text); border: 1px solid #2a3040; border-radius: 6px; padding: 8px; font: inherit; width: 100%; max-width: 260px; }
+  #share { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  #share code { background: #0b0d12; border-radius: 6px; padding: 8px; word-break: break-all; flex: 1 1 240px; color: var(--accent); }
+  #share button { margin-top: 0; }
+  .howto { font-size: 13px; }
+  #netbadge { position: fixed; left: 10px; top: 8px; z-index: 4; background: #000a; color: #fffc; border-radius: 8px; padding: 6px 10px;
+    font: 12px/1.4 system-ui, sans-serif; cursor: pointer; max-width: 70vw; }
   #log { margin-top: 16px; max-height: 260px; overflow: auto; background: #0008; border-radius: 8px; padding: 8px;
     font: 12px/1.4 ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; word-break: break-all; }
   #log:empty { display: none; }
@@ -45,11 +54,26 @@
       <button id="start" hidden>Start</button>
       <button id="forget" class="secondary" hidden>Remove stored game files</button>
     </div>
+    <div id="online">
+      <h2>Online play</h2>
+      <p id="online-status">Race friends in their browsers. Create a room and send them the link.</p>
+      <label for="pname">Your name</label><br>
+      <input id="pname" maxlength="16" autocomplete="nickname">
+      <div>
+        <button id="create-room" class="secondary">Create online room</button>
+        <button id="leave-room" class="secondary" hidden>Leave room</button>
+      </div>
+      <div id="share" hidden><code id="share-link"></code><button id="copy-link" class="secondary">Copy link</button></div>
+      <p class="howto" id="howto" hidden>After Start: <b>Connect Players → Network IPX</b>. One player picks
+        <b>Create Game</b>, everyone else picks the game under <b>Games Available</b> and <b>Join Game</b>.
+        For two players, <b>Peer-to-Peer</b> gives both the same responsiveness.</p>
+    </div>
     <div id="log"></div>
   </section>
 </main>
 <div id="screen"><canvas id="canvas" width="640" height="480"></canvas></div>
 <div id="fps" hidden></div>
+<div id="netbadge" hidden title="Click to copy the room link"></div>
 <div id="hint" hidden>Click to capture the mouse · Esc releases it</div>
 <script type="module" src="main.js"></script>
 </body>

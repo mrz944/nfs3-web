@@ -1,6 +1,8 @@
 // Local static server for the web build, with the headers shared-memory
 // threads need (cross-origin isolation).
-//   node web/serve.mjs [port] [--game DIR] [--tailscale [httpsPort]]
+//   node web/serve.mjs [port] [--game DIR] [--tailscale [httpsPort]] [--relay-tcp PORT|PATH]
+// Also serves the online lobby/relay (WebSocket /net, relay.mjs); --relay-tcp adds a
+// raw-TCP endpoint on 127.0.0.1 for native test builds (RT_NET=127.0.0.1:PORT).
 // --tailscale publishes the server on your tailnet over HTTPS (tailscale serve,
 // tailnet only) and removes that again on exit. Plain http://<tailscale ip> is
 // not enough: browsers allow shared-memory threads and OPFS only on https/localhost.
@@ -9,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { createReadStream, readdirSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { handleUpgrade, listenRaw } from './relay.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 // --game DIR (dev only): serve a local game folder at /__dev/game/ so the page's
@@ -19,6 +22,9 @@ const gameDir = gi >= 0 ? resolve(args.splice(gi, 2)[1]) : null;
 const ti = args.indexOf('--tailscale');
 let tsPort = null;
 if (ti >= 0) { tsPort = /^\d+$/.test(args[ti + 1] || '') ? Number(args.splice(ti, 2)[1]) : (args.splice(ti, 1), 10000); }
+const ri = args.indexOf('--relay-tcp');
+const rawArg = ri >= 0 ? args.splice(ri, 2)[1] : '';
+const rawPort = /^\d+$/.test(rawArg) ? Number(rawArg) : rawArg;   // port or Unix socket path
 const port = Number(args[0] || process.env.PORT || 8080);
 function listFiles(dir, pre = '') {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -29,7 +35,7 @@ const types = {
   '.wasm': 'application/wasm', '.json': 'application/json', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml',
 };
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   let path = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '');
   if (path === '' || path.endsWith('/')) path += 'index.html';
@@ -53,7 +59,11 @@ createServer((req, res) => {
     'Cache-Control': 'no-cache',
   });
   createReadStream(file).pipe(res);
-}).listen(port, '127.0.0.1', () => {
+});
+// online play: WebSocket lobby/relay at /net (see relay.mjs)
+server.on('upgrade', (req, sock) => { if (new URL(req.url, 'http://x').pathname === '/net') handleUpgrade(req, sock); else sock.destroy(); });
+if (rawPort) listenRaw(rawPort);
+server.listen(port, '127.0.0.1', () => {
   console.log(`NFS3 web runtime: http://localhost:${port}/` + (gameDir ? `  (dev game folder: ${gameDir}, open ?devimport)` : ''));
   if (tsPort) startTailscale();
 });

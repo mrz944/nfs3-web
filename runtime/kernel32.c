@@ -326,12 +326,28 @@ static uint32_t k_WaitForMultipleObjectsEx(CPU *c, const uint32_t *a) {
     uint32_t gens[64];
     for (uint32_t i = 0; i < n && i < 64; i++) { Waitable *w = get_waitable(RD32(arr + 4 * i)); gens[i] = w ? w->pulse_gen : 0; }
     for (;;) {
-        uint32_t done = 0;
-        for (uint32_t i = 0; i < n; i++) {
-            Waitable *w = get_waitable(RD32(arr + 4 * i));
-            if (w && wait_one_gen(w, 0, gens[i])) { if (!all) return WAIT_OBJECT_0 + i; done++; }
+        if (!all) {
+            for (uint32_t i = 0; i < n; i++) {
+                Waitable *w = get_waitable(RD32(arr + 4 * i));
+                if (w && wait_one_gen(w, 0, gens[i])) return WAIT_OBJECT_0 + i;
+            }
+        } else {
+            /* bWaitAll: only take (reset) the objects once every one of them is ready,
+             * otherwise an auto-reset event could be consumed without the wait succeeding */
+            uint32_t ready = 0;
+            for (uint32_t i = 0; i < n; i++) {
+                Waitable *w = get_waitable(RD32(arr + 4 * i));
+                if (!w) { ready++; continue; }
+                pthread_mutex_lock(&w->mu);
+                int ok = w->is_mutex ? (!w->count || pthread_equal(w->owner, pthread_self())) : (w->signaled || w->pulse_gen != gens[i]);
+                pthread_mutex_unlock(&w->mu);
+                ready += ok;
+            }
+            if (ready == n) {
+                for (uint32_t i = 0; i < n; i++) { Waitable *w = get_waitable(RD32(arr + 4 * i)); if (w) wait_one_gen(w, 0, gens[i]); }
+                return WAIT_OBJECT_0;
+            }
         }
-        if (all && done == n) return WAIT_OBJECT_0;
         struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
         uint64_t el = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
         if (ms != INFINITE && el >= ms) return WAIT_TIMEOUT;

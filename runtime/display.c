@@ -4,7 +4,8 @@
  *   RT_DUMP=N                dump every Nth presented frame to build/frames/ (0 = off)
  *   RT_INPUT="t:KEY,..."     scripted key taps at t milliseconds, e.g. "9000:RETURN,12000:DOWN"
  *                            KEY may be RETURN ESCAPE SPACE UP DOWN LEFT RIGHT TAB A..Z 0..9 F1..F12
- *                            suffix +ms to hold, e.g. "15000:UP+3000"; CLICK@x;y clicks at game coords
+ *                            suffix +ms to hold, e.g. "15000:UP+3000"; CLICK@x;y clicks at game coords,
+ *                            MOVE@x;y only moves (both relative to the game's cursor start, see RT_MOUSE_SCALE)
  *
  * Input reaches the game three ways, because we don't know yet which one each
  * screen uses: window messages (WM_KEYDOWN/UP/CHAR, mouse), GetAsyncKeyState
@@ -122,6 +123,13 @@ static void *script_main(void *p) {
         k++;
         uint32_t hold = 120;
         char *plus = strchr(k, '+'); if (plus) { *plus = 0; hold = (uint32_t)atoi(plus + 1); }
+        if (!strncasecmp(k, "MOVE@", 5)) {           /* MOVE@x;y: move only (same coordinates as CLICK) */
+            int x = atoi(k + 5), y = 0; char *semi = strchr(k, ';'); if (semi) y = atoi(semi + 1);
+            sleep_until_ms(t);
+            int x0 = g_mouse_x, y0 = g_mouse_y;
+            for (int i = 1; i <= 4; i++) { input_mouse(x0 + (x - x0) * i / 4, y0 + (y - y0) * i / 4, 0, 0); usleep(30000); }
+            continue;
+        }
         if (!strncasecmp(k, "CLICK@", 6)) {          /* CLICK@x;y in 640x480 game coordinates */
             int x = atoi(k + 6), y = 0; char *semi = strchr(k, ';'); if (semi) y = atoi(semi + 1);
             sleep_until_ms(t);
@@ -149,8 +157,9 @@ static int dump_every = -1;
 static uint32_t frame_no;
 
 static void dump_ppm(const uint8_t *px, int w, int h, int pitch, int bpp, uint32_t n) {
-    mkdir("build/frames", 0755);
-    char path[64]; snprintf(path, sizeof path, "build/frames/%05u.ppm", n);
+    const char *dir = getenv("RT_DUMP_DIR") ? getenv("RT_DUMP_DIR") : "build/frames";
+    mkdir(dir, 0755);
+    char path[512]; snprintf(path, sizeof path, "%s/%05u.ppm", dir, n);
     FILE *f = fopen(path, "wb"); if (!f) return;
     fprintf(f, "P6\n%d %d\n255\n", w, h);
     for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {

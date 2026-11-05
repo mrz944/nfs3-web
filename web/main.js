@@ -20,7 +20,12 @@ for (const k of ['log', 'warn', 'error']) { const orig = console[k].bind(console
 window.addEventListener('error', (e) => log('ERROR', e.message, e.filename ? `${e.filename}:${e.lineno}` : ''));
 window.addEventListener('unhandledrejection', (e) => log('ERROR (promise)', e.reason?.stack || e.reason));
 
+import { Net, newRoomCode } from './net.js';
+
 const GAME_DIR = 'nfs3';
+const net = new Net();
+const roomFromHash = () => (new URLSearchParams(location.hash.slice(1)).get('room') || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+const roomLink = (r) => `${location.origin}${location.pathname}#room=${r}`;
 let buildInfo = null;
 
 // ----------------------------------------------------------------- storage
@@ -187,6 +192,13 @@ async function start() {
   $('start').disabled = true;
   status('Loading the recompiled game…');
   await ensureIni();
+  const room = roomFromHash();
+  if (room) {
+    const name = ($('pname').value.trim() || 'Player').slice(0, 16);
+    status(`Joining online room ${room}…`);
+    const w = await net.join(room, name);
+    log(`online: room ${w.room}, ${w.peers.length + 1} player(s), node ${w.id}`);
+  }
   log('loading dist/nfs3.js');
   const { default: NFS3 } = await import('./dist/nfs3.js');
   log('instantiating wasm + starting worker pool (cores:', navigator.hardwareConcurrency + ')');
@@ -199,6 +211,7 @@ async function start() {
     printErr: (t) => console.log(t),
   });
   log('runtime ready, game thread running');
+  if (net.id) { mod.ccall('rt_net_set_node', null, ['string'], [net.id]); net.attach(mod); showNetBadge(); }
   // keep the log over the game until frames arrive (always with ?log)
   const keepLog = new URLSearchParams(location.search).has('log');
   $('log').classList.add('overlay'); document.body.appendChild($('log'));
@@ -226,7 +239,39 @@ async function start() {
   requestAnimationFrame(frame);
 }
 
+function showNetBadge() {
+  const b = $('netbadge');
+  const draw = () => {
+    const s = net.summary();
+    b.textContent = `Room ${s.room} · ${s.players} player${s.players === 1 ? '' : 's'}` + (s.peers.length ? ' · ' + s.peers.join(' · ') : ' · waiting for friends');
+  };
+  b.hidden = false; draw();
+  net.addEventListener('status', draw);
+  net.addEventListener('log', (e) => log('online:', e.detail));
+  b.onclick = () => navigator.clipboard?.writeText(roomLink(net.room)).then(() => { b.textContent = 'Room link copied'; setTimeout(draw, 1200); });
+}
+
+function setupOnline() {
+  const name = $('pname');
+  try { name.value = localStorage.getItem('nfs3.name') || ''; } catch {}
+  name.addEventListener('change', () => { try { localStorage.setItem('nfs3.name', name.value.trim()); } catch {} });
+  const refresh = () => {
+    const room = roomFromHash();
+    $('create-room').hidden = !!room; $('leave-room').hidden = !room; $('share').hidden = !room; $('howto').hidden = !room;
+    $('share-link').textContent = room ? roomLink(room) : '';
+    $('online-status').textContent = room
+      ? `You're in online room ${room}. Everyone who opens this link joins the same room.`
+      : 'Race friends in their browsers. Create a room and send them the link.';
+  };
+  $('create-room').addEventListener('click', () => { location.hash = 'room=' + newRoomCode(); });
+  $('leave-room').addEventListener('click', () => { history.replaceState(null, '', location.pathname + location.search); refresh(); });
+  $('copy-link').addEventListener('click', () => navigator.clipboard?.writeText(roomLink(roomFromHash())).then(() => { $('copy-link').textContent = 'Copied'; setTimeout(() => { $('copy-link').textContent = 'Copy link'; }, 1200); }));
+  window.addEventListener('hashchange', refresh);
+  refresh();
+}
+
 async function init() {
+  setupOnline();
   log('page loaded; crossOriginIsolated =', crossOriginIsolated, '; SharedArrayBuffer =', typeof SharedArrayBuffer);
   if (!crossOriginIsolated) {
     status('This page must be served with cross-origin isolation (COOP/COEP headers). Use web/serve.mjs.', true);

@@ -178,43 +178,7 @@ uint32_t module_proc(uint32_t hmod, const char *name) {
     return thunk_new(full, trace_fns[s], nargs);
 }
 
-/* ---------------------------------------------------------------- WSOCK32 */
-/* Network play is wired to WebRTC/WebSocket in the networking milestone.
- * Until then sockets fail cleanly, which the game treats as "no network". */
-static uint32_t ws_zero(CPU *c, const uint32_t *a) { return 0; }
-static uint32_t ws_err(CPU *c, const uint32_t *a) { return 0xFFFFFFFFu; }
-static uint32_t ws_WSAStartup(CPU *c, const uint32_t *a) {
-    uint32_t p = A(1);
-    if (p) { memset(G + p, 0, 400); WR16(p, 0x0101); WR16(p + 2, 0x0101); strcpy(HSTR(p + 4), "nfs3-webgl sockets"); }
-    return 0;
-}
-static uint32_t ws_WSAGetLastError(CPU *c, const uint32_t *a) { return 10050; /* WSAENETDOWN */ }
-static uint32_t ws_htons(CPU *c, const uint32_t *a) { return __builtin_bswap16((uint16_t)A(0)); }
-static uint32_t ws_gethostname(CPU *c, const uint32_t *a) { snprintf(HSTR(A(0)), A(1), "nfs3web"); return 0; }
-static uint32_t ws_inet_addr(CPU *c, const uint32_t *a) {
-    unsigned b[4];
-    if (sscanf(HSTR(A(0)), "%u.%u.%u.%u", &b[0], &b[1], &b[2], &b[3]) != 4) return 0xFFFFFFFFu;
-    return b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24);
-}
-static uint32_t ntoa_buf;
-static uint32_t ws_inet_ntoa(CPU *c, const uint32_t *a) {
-    if (!ntoa_buf) ntoa_buf = galloc(32);
-    uint32_t v = A(0);
-    snprintf(HSTR(ntoa_buf), 32, "%u.%u.%u.%u", v & 255, (v >> 8) & 255, (v >> 16) & 255, v >> 24);
-    return ntoa_buf;
-}
-#define W(n, args, fn) {"WSOCK32.DLL", #n, args, fn}
-const ImportDef imp_wsock32[] = {
-    W(gethostname, 2, ws_gethostname), W(ntohs, 1, ws_htons), W(inet_ntoa, 1, ws_inet_ntoa),
-    W(gethostbyname, 1, ws_zero), W(inet_addr, 1, ws_inet_addr), W(listen, 2, ws_err),
-    W(shutdown, 2, ws_err), W(connect, 3, ws_err), W(accept, 3, ws_err), W(__WSAFDIsSet, 2, ws_zero),
-    W(select, 5, ws_err), W(send, 4, ws_err), W(recv, 4, ws_err), W(sendto, 6, ws_err),
-    W(WSAGetLastError, 0, ws_WSAGetLastError), W(getsockname, 3, ws_err), W(bind, 3, ws_err),
-    W(htons, 1, ws_htons), W(ioctlsocket, 3, ws_err), W(setsockopt, 5, ws_err), W(recvfrom, 6, ws_err),
-    W(WSACleanup, 0, ws_zero), W(closesocket, 1, ws_zero), W(socket, 3, ws_err),
-    W(WSAStartup, 2, ws_WSAStartup),
-    {0},
-};
+/* WSOCK32 lives in net.c */
 
 void kernel32_init(void);
 void win32_init(void) { kernel32_init(); }

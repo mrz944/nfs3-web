@@ -110,7 +110,11 @@ static uint32_t u_GetClientRect(CPU *c, const uint32_t *a) {
 static uint32_t u_AdjustWindowRect(CPU *c, const uint32_t *a) { return 1; }
 static uint32_t u_ClientToScreen(CPU *c, const uint32_t *a) { return 1; }
 static uint32_t u_GetSystemMetrics(CPU *c, const uint32_t *a) {
-    switch (A(0)) { case 0: return (uint32_t)g_screen_w; case 1: return (uint32_t)g_screen_h; default: return 0; }
+    switch (A(0)) {
+    case 0: return (uint32_t)g_screen_w; case 1: return (uint32_t)g_screen_h;
+    case 0x3f: return 1;   /* SM_NETWORK: a network is present (the game hides network play otherwise) */
+    default: return 0;
+    }
 }
 static uint32_t u_GetAsyncKeyState(CPU *c, const uint32_t *a) { return g_keys[A(0) & 0xFF] ? 0x8000u : 0; }
 static uint32_t u_GetKeyState(CPU *c, const uint32_t *a) { return g_keys[A(0) & 0xFF] ? 0xFF80u : 0; }
