@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFS3 Web Runtime</title>
+<style>
+  :root { --bg: #0b0d12; --panel: #161a23; --text: #e8eaf0; --muted: #9aa3b5; --accent: #5aa0ff; --err: #ff6b6b; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { min-height: 100%; display: grid; place-items: center; padding: 16px; }
+  #setup { max-width: 560px; width: 100%; background: var(--panel); border-radius: 12px; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { color: var(--muted); margin: 8px 0; }
+  button, label.btn { display: inline-block; background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 10px 16px; font: inherit; cursor: pointer; margin-top: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.secondary { background: transparent; color: var(--muted); border: 1px solid #2a3040; }
+  progress { width: 100%; height: 8px; margin-top: 12px; }
+  #status { min-height: 1.5em; }
+  .err { color: var(--err); }
+  #screen { display: none; width: 100vw; height: 100vh; background: #000; }
+  canvas { width: 100%; height: 100%; display: block; image-rendering: auto; }
+  #fps { position: fixed; right: 10px; bottom: 8px; color: #fff9; font: 12px ui-monospace, monospace; pointer-events: none; }
+  #hint { position: fixed; left: 12px; bottom: 8px; color: #fff8; font-size: 12px; pointer-events: none; }
+  input[type=file] { display: none; }
+  #log { margin-top: 16px; max-height: 260px; overflow: auto; background: #0008; border-radius: 8px; padding: 8px;
+    font: 12px/1.4 ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; word-break: break-all; }
+  #log:empty { display: none; }
+  #log.overlay { position: fixed; right: 8px; top: 8px; width: min(560px, 90vw); max-height: 40vh; margin: 0; z-index: 5; }
+</style>
+</head>
+<body>
+<main id="setup-wrap">
+  <section id="setup">
+    <h1>NFS3 Web Runtime</h1>
+    <p>Runs your own copy of Need for Speed III: Hot Pursuit (PC, modern patch) in the browser.
+       Your game folder is copied into this browser's private storage once; nothing is uploaded.</p>
+    <p id="status"></p>
+    <progress id="progress" max="1" value="0" hidden></progress>
+    <div>
+      <label class="btn" id="pick-label" hidden>Choose NFS3 folder…<input type="file" id="pick" webkitdirectory multiple></label>
+      <button id="start" hidden>Start</button>
+      <button id="forget" class="secondary" hidden>Remove stored game files</button>
+    </div>
+    <div id="log"></div>
+  </section>
+</main>
+<div id="screen"><canvas id="canvas" width="640" height="480"></canvas></div>
+<div id="fps" hidden></div>
+<div id="hint" hidden>Click to capture the mouse · Esc releases it</div>
+<script type="module" src="main.js"></script>
+</body>
+</html>

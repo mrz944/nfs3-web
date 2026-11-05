@@ -1,0 +1,15 @@
+# Never commit EA code or data, or anything derived from them
+.venv/
+gen/
+build/
+*.wasm
+game/
+*.exe
+*.dll
+*.viv
+*.qfs
+*.frd
+web/dist/
+deps/
+__pycache__/
+*.pyc
