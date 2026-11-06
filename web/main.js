@@ -208,16 +208,30 @@ function attachInput(mod, canvas) {
 }
 
 // ------------------------------------------------------------------- audio
+// The AudioContext is made inside the Start click (Safari only lets audio start during the
+// click itself, not after the awaits in start()); startAudio() then plugs the game into it.
+let earlyAudio = null;
+function makeAudioContext() {
+  try {
+    const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+    ctx.resume().catch(() => {});
+    return { ctx, worklet: ctx.audioWorklet.addModule('audio-worklet.js') };
+  } catch (e) { log('audio context failed:', e.message); return null; }
+}
 async function startAudio(mod) {
-  const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
-  await ctx.audioWorklet.addModule('audio-worklet.js');
+  const a = earlyAudio || makeAudioContext();
+  if (!a) return null;
+  const ctx = a.ctx;
+  await a.worklet;
   const node = new AudioWorkletNode(ctx, 'ring-player', { outputChannelCount: [2] });
   node.port.postMessage({ buffer: mod.HEAPU8.buffer, ptr: mod._rt_web_audio() });
   node.connect(ctx.destination);
+  log('audio context:', ctx.state);
+  ctx.onstatechange = () => log('audio context:', ctx.state);
   // browsers keep audio suspended until a user gesture: never wait for it here
   if (ctx.state !== 'running') {
     log('audio waits for a click or key press');
-    const resume = () => ctx.resume().then(() => { log('audio running'); for (const e of ['pointerdown', 'keydown']) window.removeEventListener(e, resume, true); });
+    const resume = () => ctx.resume().then(() => { for (const e of ['pointerdown', 'keydown']) window.removeEventListener(e, resume, true); });
     for (const e of ['pointerdown', 'keydown']) window.addEventListener(e, resume, true);
   }
   return ctx;
@@ -270,7 +284,7 @@ async function start() {
   $('hint').hidden = false;
   const canvas = $('canvas');
   attachInput(mod, canvas);
-  startAudio(mod).catch((e) => console.warn('audio unavailable:', e));
+  startAudio(mod).catch((e) => log('audio unavailable:', e.message || e));
 
   let fpsN = 0, fpsT = performance.now(), first = true, stalled = false, lastFresh = performance.now();
   $('fps').hidden = false;
@@ -581,7 +595,7 @@ async function init() {
     try { await importFolder(await serverFiles()); track('import', { from: 'server' }); } catch (err) { status(err.message, true); return; }
   }
   if (new URLSearchParams(location.search).has('autostart') && (await hasGame())) { start().catch((e) => { console.error('Failed to start:', e.stack || e); status('Failed to start: ' + e.message, true); $('setup-wrap').hidden = false; }); }
-  $('start').addEventListener('click', () => start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }));
+  $('start').addEventListener('click', () => { if (!earlyAudio) earlyAudio = makeAudioContext(); start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }); });
   await refresh();
 }
 init();

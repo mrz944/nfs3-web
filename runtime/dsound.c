@@ -227,11 +227,28 @@ void snd_output_mix(int16_t *out, int frames) {
 typedef struct { volatile uint32_t rd, wr; uint32_t cap, rate; int16_t data[2 * WEB_AUDIO_CAP]; } WebAudio;
 static WebAudio web_audio = {0, 0, WEB_AUDIO_CAP, OUT_RATE};
 EMSCRIPTEN_KEEPALIVE void *rt_web_audio(void) { return &web_audio; }
+/* The game's sound clock (buffer play positions, which the intro movies and
+ * streaming wait on) only moves when we mix. If the page isn't draining the
+ * ring (AudioContext still suspended by the autoplay policy, worklet not
+ * loaded, tab audio blocked), mix on wall-clock time anyway and drop the
+ * oldest samples, so the game never waits for a sound card that isn't there. */
 static void *web_audio_main(void *unused) {
     (void)unused;
     int16_t tmp[2 * 512];
+    uint32_t last_rd = 0; uint64_t rd_moved = now_ns(), wall_mixed = 0, wall_t0 = 0;
     for (;;) {
         uint32_t rd = __atomic_load_n(&web_audio.rd, __ATOMIC_ACQUIRE), wr = web_audio.wr;
+        uint64_t t = now_ns();
+        if (rd != last_rd) { last_rd = rd; rd_moved = t; wall_t0 = 0; }
+        else if (wr - rd >= 4096 && t - rd_moved > 100000000ull) {     /* not drained for 100 ms */
+            if (!wall_t0) { wall_t0 = t; wall_mixed = 0; rt_log("audio: output not playing, sound clock runs on wall time"); }
+            if ((t - wall_t0) * OUT_RATE / 1000000000ull >= wall_mixed + 512) {
+                uint32_t nrd = wr + 512 - 4096;                      /* drop the oldest 512 frames */
+                __atomic_compare_exchange_n(&web_audio.rd, &rd, nrd, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+                last_rd = rd = __atomic_load_n(&web_audio.rd, __ATOMIC_ACQUIRE);
+                wall_mixed += 512;
+            }
+        }
         if (wr - rd < 4096) {
             snd_output_mix(tmp, 512);
             for (int k = 0; k < 512; k++) {
