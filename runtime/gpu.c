@@ -46,6 +46,9 @@ volatile double gpu_renderer_seen_reset; /* headless test renderer: don't pace t
 static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + t.tv_nsec * 1e-9; }
 
 static volatile double last_gl_frame, last_dd_frame;
+/* pacing counters for the page's perf log (rt_gpu_stats): frames the game published, frames
+ * replaced before the renderer showed them, and time the game spent waiting for the renderer */
+static double st_published, st_replaced, st_wait_ms;
 
 /* does this frame start by clearing the whole picture? */
 static int frame_is_full(const GFrame *f) {
@@ -87,7 +90,9 @@ void gpu_publish(GFrame *f) {
     if (pending && now_s() - renderer_seen < 0.5) {
         struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl);
         dl.tv_nsec += 25 * 1000000; if (dl.tv_nsec >= 1000000000) { dl.tv_sec++; dl.tv_nsec -= 1000000000; }
+        double w0 = now_s();
         while (pending && pthread_cond_timedwait(&fq_cv, &fq_mu, &dl) == 0) {}
+        st_wait_ms += (now_s() - w0) * 1000;
     }
 #ifdef __EMSCRIPTEN__
     /* nobody is drawing (hidden tab/window: the browser stops animation frames):
@@ -106,7 +111,8 @@ void gpu_publish(GFrame *f) {
         /* incremental frame (draws over the previous picture, e.g. a loading bar):
          * append it to the frame still waiting so nothing it builds on is lost */
         frame_append(pending, f); old = f; pending->seq = f->seq;
-    } else { old = pending; pending = f; }
+    } else { if (pending) st_replaced++; old = pending; pending = f; }
+    st_published++;
     last_gl_frame = now_s();
     pthread_mutex_unlock(&fq_mu);
     gpu_frame_free(old);
@@ -133,6 +139,8 @@ void gpu_ddraw_frame(const uint8_t *px, int w, int h, int pitch, int bpp) {
 static GLuint prog, prog_blit, vbo, vao, quad_vao, quad_vbo, fog_tex, ovl_tex, dd_tex;
 static GLuint fbo, fbo_color, fbo_depth; static int fbo_w, fbo_h;
 static GLuint gltex[GPU_MAX_TEX]; static uint32_t gltex_ver[GPU_MAX_TEX];
+static uint32_t gltex_par[GPU_MAX_TEX];  /* filter/wrap last set on each texture (+1), to skip repeats */
+static int max_scale = 4;               /* upper limit for the integer render scale (rt_gpu_set_max_scale) */
 static GFrame *shown;
 static GLint u_res, u_has_tex, u_cc, u_ac, u_tc, u_inv, u_const, u_fogc, u_chroma, u_atest, u_aref, u_fog_on, u_chroma_on;
 static GLint ub_swz, ub_rect, ub_key;
@@ -297,7 +305,7 @@ static void upload_tex(int slot) {
         p += w * h; if (w > 1) w >>= 1; if (h > 1) h >>= 1;
     }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, t->levels - 1);
-    gltex_ver[slot] = t->version;
+    gltex_ver[slot] = t->version; gltex_par[slot] = 0;
 }
 
 static const GLenum cmp_gl[8] = { GL_NEVER, GL_LESS, GL_EQUAL, GL_LEQUAL, GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS };
@@ -322,17 +330,20 @@ static void scissor(const int16_t *clip, int fh) {
 }
 
 static void apply_state(const GState *s, const GFrame *f) {
-    glUseProgram(prog);
     int has_tex = s->tex >= 0 && s->tex < GPU_MAX_TEX && texs[s->tex].rgba;
-    glActiveTexture(GL_TEXTURE0);
     if (has_tex) {
         upload_tex(s->tex);
         int mip = s->tex_mip && texs[s->tex].levels > 1;
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->tex_min_linear ? (mip ? GL_LINEAR_MIPMAP_NEAREST : GL_LINEAR) : (mip ? GL_NEAREST_MIPMAP_NEAREST : GL_NEAREST));
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, s->tex_mag_linear ? GL_LINEAR : GL_NEAREST);
-        static const GLenum wrap[3] = { GL_REPEAT, GL_CLAMP_TO_EDGE, GL_MIRRORED_REPEAT };
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap[s->tex_clamp_s < 3 ? s->tex_clamp_s : 0]);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap[s->tex_clamp_t < 3 ? s->tex_clamp_t : 0]);
+        int cs = s->tex_clamp_s < 3 ? s->tex_clamp_s : 0, ct = s->tex_clamp_t < 3 ? s->tex_clamp_t : 0;
+        uint32_t par = 1 + (uint32_t)(s->tex_min_linear != 0) + 2u * mip + 4u * (s->tex_mag_linear != 0) + 8u * cs + 32u * ct;
+        if (gltex_par[s->tex] != par) {    /* every GL call costs on the web: set only what changed */
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, s->tex_min_linear ? (mip ? GL_LINEAR_MIPMAP_NEAREST : GL_LINEAR) : (mip ? GL_NEAREST_MIPMAP_NEAREST : GL_NEAREST));
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, s->tex_mag_linear ? GL_LINEAR : GL_NEAREST);
+            static const GLenum wrap[3] = { GL_REPEAT, GL_CLAMP_TO_EDGE, GL_MIRRORED_REPEAT };
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap[cs]);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap[ct]);
+            gltex_par[s->tex] = par;
+        }
     }
     glUniform1i(u_has_tex, has_tex);
     glUniform4i(u_cc, s->cc_func, s->cc_factor, s->cc_local, s->cc_other);
@@ -370,8 +381,12 @@ static void render_frame(GFrame *f) {
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(f->nverts * sizeof(GVert)), f->verts, GL_STREAM_DRAW);
     glUseProgram(prog);
     glUniform2f(u_res, (float)f->w, (float)f->h);
+    static uint8_t fog_last[256]; static int fog_set;
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, fog_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 256, 1, 0, GL_RED, GL_UNSIGNED_BYTE, f->fog_lut);
+    if (!fog_set || memcmp(fog_last, f->fog_lut, sizeof fog_last)) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 256, 1, 0, GL_RED, GL_UNSIGNED_BYTE, f->fog_lut);
+        memcpy(fog_last, f->fog_lut, sizeof fog_last); fog_set = 1;
+    }
     glActiveTexture(GL_TEXTURE0);
     uint32_t applied = UINT32_MAX;
     gpu_tex_lock();
@@ -396,6 +411,7 @@ static void render_frame(GFrame *f) {
             glBindTexture(GL_TEXTURE_2D, ovl_tex);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, l->w, l->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, l->rgba);
             draw_quad_tex(ovl_tex, -1, 1, 1, -1, 0, 1);
+            glUseProgram(prog);
             glEnable(GL_SCISSOR_TEST);
             applied = UINT32_MAX;
         }
@@ -443,7 +459,7 @@ int gpu_render(int out_w, int out_h) {
         pthread_mutex_unlock(&dd_mu);
     } else {
         src_w = shown->w; src_h = shown->h;
-        int s = out_h / src_h; if (s < 1) s = 1; if (s > 4) s = 4;
+        int s = out_h / src_h; if (s > max_scale) s = max_scale; if (s < 1) s = 1;
         scale = s;
         if (fresh || !fbo) render_frame(shown);
     }
@@ -465,6 +481,14 @@ int gpu_render(int out_w, int out_h) {
 }
 
 #if defined(__EMSCRIPTEN__)
+/* the page lowers this when the GPU can't keep up (main.js, perf log) */
+EMSCRIPTEN_KEEPALIVE void rt_gpu_set_max_scale(int s) { max_scale = s < 1 ? 1 : s > 4 ? 4 : s; }
+/* [published, replaced, wait ms, scale, fbo w, fbo h]: counters are totals since start */
+EMSCRIPTEN_KEEPALIVE double *rt_gpu_stats(void) {
+    static double out[6];
+    out[0] = st_published; out[1] = st_replaced; out[2] = st_wait_ms; out[3] = scale; out[4] = fbo_w; out[5] = fbo_h;
+    return out;
+}
 /* called by the page every animation frame (main browser thread) */
 EMSCRIPTEN_KEEPALIVE int rt_gpu_frame(int w, int h) {
     static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx;

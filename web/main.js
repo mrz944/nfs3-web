@@ -238,7 +238,10 @@ async function start() {
   status('Loading the recompiled game…');
   await ensureIni();
   const startT = performance.now();
-  track('start', { online: !!net.id });
+  const dev = await deviceInfo();
+  log('device:', Object.entries(dev).map(([k, v]) => `${k}=${v}`).join(' '));
+  if (dev.software) log('WARNING: the browser renders without the GPU (hardware acceleration is off or blocked); expect low frame rates');
+  track('start', { online: !!net.id, gpu: String(dev.gpu || ''), dpr: dev.dpr, cores: dev.cores, software: !!dev.software });
   if (net.id) track('online_start', { players: net.peers.size + 1 });
   if (net.id) log(`online: room ${net.room} "${net.info?.name}", ${net.peers.size + 1} player(s), node ${net.id}`);
   log('loading dist/nfs3.js');
@@ -256,6 +259,7 @@ async function start() {
   });
   log('runtime ready, game thread running');
   if (net.id) { mod.ccall('rt_net_set_node', null, ['string'], [net.id]); net.attach(mod); net.setState('game'); showNetBadge(); }
+  startPerfLog(mod);
   // keep the log over the game until frames arrive (always with ?log)
   const keepLog = logWanted();
   $('log').classList.add('overlay'); document.body.appendChild($('log'));
@@ -273,7 +277,9 @@ async function start() {
   function frame() {
     if (gameDead) return;
     fitCanvas(canvas);
+    const m0 = performance.now();
     const fresh = mod._rt_gpu_frame(canvas.width, canvas.height);
+    const mt = performance.now() - m0; hitch.mainMs += mt; hitch.mainMax = Math.max(hitch.mainMax, mt);
     if (fresh < 0) { status('WebGL2 is not available in this browser.', true); return; }
     if (fresh) {
       if (stalled) log(`stall over after ${((performance.now() - lastFresh) / 1000).toFixed(1)} s`);
@@ -288,11 +294,82 @@ async function start() {
       stalled = true; log('stall: no new frame from the game for 5 s'); track('error', { kind: 'stall', msg: 'no frame for 5 s' });
     }
     if (!first) playStats.ms += now - (frame.last ?? now);
+    if (frame.last) { hitch.raf = Math.max(hitch.raf, now - frame.last); hitch.intervals.push(now - frame.last); }
+    if (fresh && hitch.lastFresh) hitch.game = Math.max(hitch.game, now - hitch.lastFresh);
+    if (fresh) { hitch.lastFresh = now; hitch.frames++; }
     frame.last = now;
     if (now - fpsT >= 1000) { $('fps').textContent = `${Math.round(fpsN * 1000 / (now - fpsT))} fps`; fpsN = 0; fpsT = now; }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+}
+
+// This browser's graphics and device, logged once at start (and sent with the start event),
+// so a slow machine can be told apart from slow code: software rendering, a weak GPU,
+// a high-DPI screen, battery saving...
+async function deviceInfo() {
+  const d = { cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceMemory || 0, dpr: devicePixelRatio || 1,
+    screen: `${screen.width}x${screen.height}`, window: `${innerWidth}x${innerHeight}`, isolated: crossOriginIsolated };
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2', { powerPreference: 'high-performance' });
+    if (!gl) d.gpu = 'no WebGL2';
+    else {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      d.gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+      d.vendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+      d.maxtex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+      d.software = /SwiftShader|llvmpipe|softpipe|Basic Render|Software/i.test(d.gpu);
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  } catch (e) { d.gpu = 'error ' + e.message; }
+  try { const b = await navigator.getBattery?.(); if (b) d.battery = `${Math.round(b.level * 100)}%${b.charging ? ' charging' : ' on battery'}`; } catch {}
+  try { const ua = await navigator.userAgentData?.getHighEntropyValues?.(['platformVersion', 'architecture', 'fullVersionList']);
+    if (ua) d.platform = `${ua.platform} ${ua.platformVersion || ''} ${ua.architecture || ''}`.trim(); } catch {}
+  return d;
+}
+
+// Perf log: every 2 s while the game runs, this browser's frame pacing (frames shown, frames
+// the game made, time the game waited for the screen, render scale) and, online, one part per
+// peer (link, round trip, packets, losses, longest gap between packets). It goes to the server
+// with the rest of the log (build/clientlogs/), so lag can be looked at afterwards.
+//
+// It also lowers the render scale when the GPU can't keep up: the game draws 640x480 and we
+// scale that by a whole number to fill the screen, which on a big or high-DPI screen means
+// rendering up to 2560x1920. If frames are ready but the screen doesn't take them in time,
+// the next lower scale is used (and remembered in this browser). ?scale=N forces one.
+const hitch = { raf: 0, game: 0, frames: 0, lastFresh: 0, mainMs: 0, mainMax: 0, intervals: [] };
+const savedScale = () => { try { return Number(new URLSearchParams(location.search).get('scale')) || Number(localStorage.getItem('nfs3.maxScale')) || 3; } catch { return 3; } };
+function startPerfLog(mod) {
+  if (net.id) log(`net: room ${net.room} (${net.info?.name || ''}) as "${$('pname')?.value || ''}" id ${net.id}`);
+  const forced = (() => { try { return new URLSearchParams(location.search).has('scale'); } catch { return false; } })();
+  let maxScale = savedScale(), slow = 0;
+  mod._rt_gpu_set_max_scale(maxScale);
+  log(`perf: render scale limit ${maxScale}${forced ? ' (forced by ?scale)' : ''}`);
+  const stats = () => { const p = mod._rt_gpu_stats() >> 3; return Array.from(mod.HEAPF64.subarray(p, p + 6)); };
+  let t = performance.now(), prev = stats();
+  setInterval(() => {
+    const now = performance.now(), secs = (now - t) / 1000; t = now;
+    const cur = stats(), [pub, rep, wait] = cur.map((v, i) => v - prev[i]); prev = cur;
+    const [, , , scale, fw, fh] = cur;
+    const shown = hitch.frames / secs, made = pub / secs, waitShare = wait / (secs * 1000);
+    const iv = hitch.intervals.sort((a, b) => a - b), hz = iv.length > 10 ? 1000 / iv[Math.floor(iv.length * 0.1)] : 60;
+    const visible = document.visibilityState === 'visible';
+    if (visible && shown > 5) { net.myFps = Math.round(shown); try { localStorage.setItem('nfs3.lastFps', String(net.myFps)); } catch {} }
+    log(`perf ${visible ? '' : '[tab hidden] '}fps=${Math.round(shown)} made=${Math.round(made)} replaced=${rep} wait=${Math.round(waitShare * 100)}% hz=${Math.round(hz)}`
+      + ` maxframe=${Math.round(hitch.game)}ms raf=${Math.round(hitch.raf)}ms main=${(hitch.mainMs / Math.max(1, iv.length)).toFixed(1)}/${Math.round(hitch.mainMax)}ms scale=${scale} (${fw}x${fh})`
+      + (net.id ? ' | ' + (net.netStats().join(' | ') || 'no peers') : ''));
+    // frames are waiting for the screen, but the screen runs well below its refresh rate: GPU-bound
+    const gpuBound = visible && hitch.lastFresh && shown < hz * 0.9 && (waitShare > 0.2 || rep > secs * 3);
+    slow = gpuBound ? slow + 1 : 0;
+    if (!forced && slow >= 2 && scale > 1) {
+      maxScale = scale - 1; slow = 0;
+      mod._rt_gpu_set_max_scale(maxScale);
+      try { localStorage.setItem('nfs3.maxScale', String(maxScale)); } catch {}
+      log(`perf: GPU can't keep up (${Math.round(shown)} fps at ${fw}x${fh}), render scale lowered to ${maxScale}`);
+    }
+    Object.assign(hitch, { raf: 0, game: 0, frames: 0, mainMs: 0, mainMax: 0, intervals: [] });
+  }, 2000);
+  document.addEventListener('visibilitychange', () => log(`perf: tab ${document.visibilityState}`));
 }
 
 function showNetBadge() {

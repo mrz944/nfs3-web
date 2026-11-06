@@ -141,7 +141,8 @@ export class Net extends EventTarget {
   // ------------------------------------------------------------ WebRTC
   addPeer(id, name, initiator, state = 'lobby') {
     const p = { name, state, pc: new RTCPeerConnection({ iceServers: ICE }), dc: null, rtt: null, direct: false,
-                tx: { seq: 0, hist: [] }, rx: { hi: null, seen: new Set(), gaps: 0, recovered: 0 } };
+                tx: { seq: 0, hist: [] }, rx: { hi: null, seen: new Set(), gaps: 0, recovered: 0 },
+                ctr: { tx: 0, txRelay: 0, rx: 0, rxRelay: 0, last: 0, maxGap: 0, gaps: 0, recovered: 0 } };
     this.peers.set(id, p);
     p.pc.onicecandidate = (e) => { if (e.candidate) this.send({ t: 'signal', to: id, data: { ice: e.candidate } }); };
     p.pc.onconnectionstatechange = () => { if (p.pc.connectionState === 'failed') this.emit('log', `no direct connection to ${name}, using the relay`); this.emit('status'); };
@@ -192,12 +193,21 @@ export class Net extends EventTarget {
   }
   sendTo(id, pkt) {
     const p = this.peers.get(id);
+    if (p) p.ctr.tx++;
     if (p?.dc?.readyState === 'open') { try { p.dc.send(frame(p.tx, pkt)); return; } catch {} }
+    if (p) p.ctr.txRelay++;
     if (this.ws?.readyState === 1) { const f = new Uint8Array(6 + pkt.length); f.set(unhex(id)); f.set(pkt, 6); this.ws.send(f); }
   }
-  fromRelay(f) { if (f.length > 6) this.deliver(hex(f.subarray(0, 6)), f.subarray(6)); }
-  deliver(srcId, pkt) {
+  fromRelay(f) { if (f.length > 6) this.deliver(hex(f.subarray(0, 6)), f.subarray(6), true); }
+  deliver(srcId, pkt, relayed = false) {
     const mod = this.mod;
+    const c = this.peers.get(srcId)?.ctr;
+    if (c) {
+      const now = performance.now();
+      c.rx++; if (relayed) c.rxRelay++;
+      if (c.last) c.maxGap = Math.max(c.maxGap, now - c.last);
+      c.last = now;
+    }
     if (!mod) { if (this.queue.length < 256) this.queue.push([srcId, pkt]); return; }
     const n = 6 + pkt.length, p = mod._malloc(n);
     mod.HEAPU8.set(unhex(srcId), p); mod.HEAPU8.set(pkt, p + 6);
@@ -230,6 +240,19 @@ export class Net extends EventTarget {
     }
     if (!best) return null;
     return { me: best.id === this.id, name: best.id === this.id ? 'you' : this.peers.get(best.id)?.name, worst: Math.round(best.worst) };
+  }
+  // one line per peer for the lag log (main.js, every 2 s while racing online); resets the counters
+  netStats() {
+    return [...this.peers.values()].map((p) => {
+      const c = p.ctr, r = this.rttTo(p);
+      const lost = Math.max(0, p.rx.gaps - p.rx.recovered) - Math.max(0, c.gaps - c.recovered);
+      const line = `${p.name}: ${p.direct ? 'direct' : 'RELAY'} rtt=${r != null ? Math.round(r) : '?'} relay=${this.relayRtt != null ? Math.round(this.relayRtt) : '?'}`
+        + ` tx=${c.tx}${c.txRelay ? `(${c.txRelay} relay)` : ''} rx=${c.rx}${c.rxRelay ? `(${c.rxRelay} relay)` : ''}`
+        + ` lost=${lost} recovered=${p.rx.recovered - c.recovered} maxgap=${Math.round(c.maxGap)}ms state=${p.state}`
+        + (c.last && performance.now() - c.last > 1000 ? ` silent=${Math.round(performance.now() - c.last)}ms` : '');
+      Object.assign(c, { tx: 0, txRelay: 0, rx: 0, rxRelay: 0, maxGap: 0, gaps: p.rx.gaps, recovered: p.rx.recovered });
+      return line;
+    });
   }
   summary() {
     const list = [...this.peers.values()].map((p) => {

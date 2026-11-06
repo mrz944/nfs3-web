@@ -60,6 +60,18 @@ function clientLog(req, res) {
   });
 }
 
+// room log: every 5 s, each room with 2+ players (names, state, ping to this server),
+// next to the client logs as build/clientlogs/room-<code>.log, for looking into lag later
+setInterval(() => {
+  for (const r of roomStats()) {
+    if (r.players.length < 2) continue;
+    mkdirSync(logDir, { recursive: true });
+    const line = `${new Date().toISOString()} ${r.racing ? 'racing' : 'lobby'} host=${r.host ?? '?'} ` +
+      r.players.map((p) => `${p.name}:${p.state}:${p.rtt != null ? Math.round(p.rtt) + 'ms' : '?'}`).join(' ') + '\n';
+    try { appendFileSync(join(logDir, `room-${r.code.replace(/[^a-z0-9]/gi, '')}.log`), line); } catch {}
+  }
+}, 5000).unref();
+
 // page analytics (analytics.mjs): events in build/analytics/, summary at /__stats
 const analytics = createAnalytics(resolve(root, '..', 'build', 'analytics'));
 
