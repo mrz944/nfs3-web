@@ -4,12 +4,12 @@
 
 **Need for Speed III: Hot Pursuit, recompiled to run in your browser, with online multiplayer.**
 
-Bring your own copy of the game, open a page, race your friends.
+Open the page, download the game files automatically, and race your friends.
 
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-threads-654ff0?logo=webassembly&logoColor=white)
 ![WebGL 2](https://img.shields.io/badge/WebGL-2.0-990000?logo=webgl&logoColor=white)
 ![Online](https://img.shields.io/badge/online-WebRTC%20%2B%20relay-2b7bff)
-![No game files included](https://img.shields.io/badge/game%20files-bring%20your%20own-ffb400)
+![Hosted game files](https://img.shields.io/badge/game%20files-auto%20download-ffb400)
 
 <img src="docs/screenshots/home.png" alt="NFS3 Web start page: game menu style, online room browser" width="900">
 
@@ -29,9 +29,9 @@ network stack are replaced by a small runtime written for the web.
 - 🎮 **GPU rendering.** The game's Voodoo2 (Glide 3) path goes straight to WebGL 2 at a sharp integer scale.
 - 🌐 **Online play in the browser.** Up to 8 racers per room, direct browser-to-browser
   connections (WebRTC) with a relay fallback, room browser, passwords and invite links.
-- 🔒 **Bring your own game.** No EA code or data is in this repo or on any server. Each
-  player picks their own game folder, which stays in their browser's private storage.
-- 💾 **No install.** After the first import, Start is one click.
+- 🌍 **Hosted game files.** The server supplies the game files automatically. Each
+  browser downloads them once and caches them in private storage.
+- 💾 **No install.** After the first download, Start is one click.
 
 ## The original game, and what we added
 
@@ -40,13 +40,13 @@ NFS3 Web is **not a remake and not a re-tuned version**. The game you drive is t
 | Untouched: the real NFS3 | Added by this project |
 |---|---|
 | **Handling and physics.** Every car drives exactly like the PC original. The game's own code runs, recompiled, not rewritten or re-tuned. | **Static recompilation.** x86 machine code is translated to C and then WebAssembly, so it runs in the browser without a PC emulator. |
-| **Cars, tracks, AI, police.** The original data from your own game folder, and the original opponent and Hot Pursuit logic. | **Voodoo2 on your GPU.** The 3dfx Glide 3 graphics path is redrawn with WebGL 2: Voodoo color combiners, W-buffer depth and fog, sharp integer scaling. |
+| **Cars, tracks, AI, police.** The original hosted game data, and the original opponent and Hot Pursuit logic. | **Voodoo2 on your GPU.** The 3dfx Glide 3 graphics path is redrawn with WebGL 2: Voodoo color combiners, W-buffer depth and fog, sharp integer scaling. |
 | **Music and sound.** The original soundtrack and effects through the game's own sound engine (`eacsnd.dll`). | **Internet multiplayer.** The game's LAN (IPX) mode now works over the internet: lobby, rooms with passwords, WebRTC peer-to-peer links, redundant packets, best-host pick. |
 | **Menus and modes.** Single Race, Hot Pursuit, Knockout, Tournament, Car Showcase. | **Browser integration.** OPFS game storage, AudioWorklet sound, mouse capture, frame pacing for hidden tabs, crash and stall reporting. |
 
 **Base patch.** NFS3 Web runs the **[NFS3 Modern Patch](https://veg.by/en/projects/nfs3/)** by VEG
 (Evgeny Vrublevsky): HD and widescreen support, modern-Windows fixes, faster loading and more than
-200 bug fixes. The game folder each player imports needs the Modern Patch installed (the English
+200 bug fixes. The game folder on the server needs the Modern Patch installed (the English
 base is what's been tested).
 
 **Our runtime fixes.** A few things the game expects from Windows had to be emulated precisely
@@ -122,7 +122,7 @@ NFS3 Web makes a **room** on the server look like a LAN to the game:
 
 **Racing with friends:**
 
-1. Everyone opens the page and imports their game folder once.
+1. Everyone opens the page and waits for the automatic game download.
 2. One player clicks **Create Room** (name, optional password, 2–8 players) and shares the invite link.
 3. Everyone clicks **Start Game**.
 4. The best host goes to *Connect Players → Network IPX → Create Game* (choose *Peer-to-Peer* for two players).
@@ -130,7 +130,7 @@ NFS3 Web makes a **room** on the server look like a LAN to the game:
 
 ## Getting started
 
-### What you need
+### What the host needs
 
 - **A copy of NFS3: Hot Pursuit for PC with the modern patch.** The folder with `nfs3.exe`,
   `fedata/`, `gamedata/` and `drivers/`. The build is checked against the exe's SHA-256 (see
@@ -158,24 +158,25 @@ cp -r "/path/to/Need for Speed III" game
 ### Run
 
 ```sh
-node web/serve.mjs 8080                 # http://localhost:8080/
-node web/serve.mjs 8080 --tailscale     # also on your tailnet over HTTPS (for friends)
+node web/serve.mjs 8080 --game game                 # http://localhost:8080/
+node web/serve.mjs 8080 --game game --tailscale     # optional tailnet-only hosting
 ```
 
-Open the page, click **Choose NFS3 Folder…**, pick your game folder, then **Start Game**.
+Open the page, wait for the game files to download, then click **Start Game**.
+Players do not need a local game copy. The first visit downloads about 442 MB; later visits use the browser cache.
 Keyboard controls are the original ones. Click the picture to capture the mouse, and press Esc to release it.
 
-> **Keep it private.** `web/dist/` is built from your copy of `nfs3.exe`. Share the page with
-> people you know (for example on your [Tailscale](https://tailscale.com/) tailnet) and don't put it on the public internet.
-> Browsers only allow the threads and storage the game needs on HTTPS or `localhost`, which is why
-> `--tailscale` uses `tailscale serve`.
+> Public hosting uses Cloudflare Tunnel: `https://nfs3.xyz` forwards to `http://127.0.0.1:8080`.
+> See [Cloudflare setup](docs/cloudflare.md). Both the game server and `cloudflared` must stay running.
+> The local server binds only to loopback; no inbound router ports are needed.
 
 `serve.mjs` options:
 
 | Option | What it does |
 |---|---|
 | `--tailscale [port]` | publish over HTTPS on your tailnet (default port 10000), removed again on exit |
-| `--game DIR` | test setups: the page copies this game folder into each browser automatically (no folder picker). Only for your own devices; turned off automatically if Tailscale Funnel makes the site public |
+| `--game DIR` | serve this game folder for automatic download into each browser (no folder picker), including through Funnel |
+| `--funnel [port]` | publish the page, game files and `web/dist/` through Tailscale Funnel, open to everyone. Default public port 443 (no port in the URL), forwarding to the local server port; supported ports 443, 8443 or 10000 |
 | `--relay-tcp PORT\|PATH` | lobby endpoint for native test builds (`RT_NET=…`) |
 
 The server also collects **page logs** (`build/clientlogs/`) and **cookie-free analytics**
@@ -225,5 +226,5 @@ Made by **[Marcin Zadka](https://github.com/mrz944)**.
 - [Capstone](https://www.capstone-engine.org/) and [Emscripten](https://emscripten.org/) make this possible.
 
 *Need for Speed* and *Hot Pursuit* are trademarks of Electronic Arts. This is an unofficial fan
-project, not affiliated with or endorsed by EA. It contains no EA code, data or artwork, and
-you need your own legally obtained copy of the game.
+project, not affiliated with or endorsed by EA. Generated builds and game assets remain
+git-ignored; the running server supplies them to players from the configured game folder.

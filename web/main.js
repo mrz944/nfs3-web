@@ -1,6 +1,6 @@
 // NFS3 Web Runtime: page side.
-//  1. The player's NFS3 folder is copied once into OPFS (navigator.storage, origin-private).
-//  2. The wasm runtime (dist/nfs3.js, built locally from the player's own nfs3.exe)
+//  1. The hosted NFS3 files are downloaded once into OPFS (navigator.storage, origin-private).
+//  2. The wasm runtime (dist/nfs3.js, built from the server game executable)
 //     mounts OPFS at /opfs and runs the game in Web Workers on shared memory.
 //  3. Each animation frame we upload the shared framebuffer to WebGL; input goes
 //     into a lock-free ring; audio comes out of a ring through an AudioWorklet.
@@ -60,7 +60,7 @@ async function gameDir(create = false) {
   return root.getDirectoryHandle(GAME_DIR, { create });
 }
 async function hasGame() {
-  try { const d = await gameDir(); await d.getFileHandle('nfs3.exe'); return true; } catch { return false; }
+  try { const d = await gameDir(); await d.getFileHandle('.download-complete'); return true; } catch { return false; }
 }
 async function sha256(blob) {
   const h = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
@@ -71,11 +71,16 @@ async function sha256(blob) {
 async function serverHasGame() {
   try { const r = await fetch('__dev/game-list', { method: 'HEAD' }); return r.ok; } catch { return false; }
 }
-async function devFiles() {
-  const list = await (await fetch('__dev/game-list')).json();
+async function serverFiles() {
+  const response = await fetch('__dev/game-list');
+  if (!response.ok) throw new Error('Game download unavailable. Reload to retry.');
+  const list = await response.json();
   return list.map(([path, size]) => ({
     name: path.split('/').at(-1), size, webkitRelativePath: 'dev/' + path,
-    blob: () => fetch('__dev/game/' + path.split('/').map(encodeURIComponent).join('/')).then((r) => r.blob()),
+    blob: () => fetch('__dev/game/' + path.split('/').map(encodeURIComponent).join('/')).then((r) => {
+      if (!r.ok) throw new Error(`Download failed: ${path} (${r.status}). Reload to retry.`);
+      return r.blob();
+    }),
   }));
 }
 
@@ -129,6 +134,8 @@ async function importFolder(files) {
     $('progress').value = done / total;
     status(`Copying game files… ${(done / 2 ** 20).toFixed(0)} / ${(total / 2 ** 20).toFixed(0)} MB`);
   }
+  const marker = await (await dir.getFileHandle('.download-complete', { create: true })).createWritable();
+  await marker.write('complete'); await marker.close();
   $('progress').hidden = true;
 }
 
@@ -490,11 +497,11 @@ async function init() {
     await refresh();
   });
   // a server started with --game offers its game folder: import it automatically
-  // (tailnet-only test setups); ?devimport forces the attempt and reports errors
+  // ?devimport also forces the attempt and reports errors
   const forced = new URLSearchParams(location.search).has('devimport');
   if (!(await hasGame()) && (forced || await serverHasGame())) {
-    status('Copying the game files from the server into this browser…');
-    try { await importFolder(await devFiles()); track('import', { from: 'server' }); } catch (err) { status(err.message, true); return; }
+    status('Downloading the game files into this browser…');
+    try { await importFolder(await serverFiles()); track('import', { from: 'server' }); } catch (err) { status(err.message, true); return; }
   }
   if (new URLSearchParams(location.search).has('autostart') && (await hasGame())) { start().catch((e) => { console.error('Failed to start:', e.stack || e); status('Failed to start: ' + e.message, true); $('setup-wrap').hidden = false; }); }
   $('start').addEventListener('click', () => start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }));

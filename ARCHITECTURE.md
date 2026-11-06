@@ -3,10 +3,10 @@
 Static recompilation of *Need for Speed III: Hot Pursuit* (PC, modern patch) to
 WebAssembly + WebGL, following the approach of nfsu2-web / NFSU2Recomp.
 
-**This repository contains no EA code or data.** The lifter runs on the player's
-own `nfs3.exe`; generated C, the `.wasm` module and all game files are built and
-kept locally and are git-ignored. The game data is loaded from the player's own
-install at run time.
+The lifter runs on the host's `nfs3.exe`; generated C, the `.wasm` module and
+all game files are git-ignored. The server publishes the browser build and the
+configured game folder, including through public Tailscale Funnel. Browsers
+download the game data automatically and cache it in OPFS.
 
 ## Target binary (analyzed 2026-11-05)
 
@@ -55,9 +55,10 @@ Audio goes through `eacsnd.dll` (EA's sound library, which also needs a replacem
    on WebGL2. This replaces Direct3D/Glide entirely; it's the main shortcut
    compared with nfsu2-web, which had to emulate D3D9.
 4. **`eacsnd` replacement** on Web Audio (AudioWorklet).
-5. **Data loader.** The player picks their NFS3 folder (File System Access API
-   or a dropped zip). It is mirrored into IndexedDB, and `CreateFileA` and
-   friends read from it. Nothing is uploaded.
+5. **Data loader.** The browser downloads the configured server game folder
+   into OPFS, and `CreateFileA` and friends read from it. A completion marker
+   prevents interrupted downloads from being mistaken for a ready game.
+   A local folder picker remains available when no server game folder is configured.
 6. **Online play.** The game already does multiplayer over WSOCK32
    TCP/UDP. The runtime maps sockets onto WebRTC data channels (UDP-like,
    unordered) plus WebSocket fallback, through a small signalling/relay server

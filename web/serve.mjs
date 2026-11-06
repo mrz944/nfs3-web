@@ -1,31 +1,32 @@
 // Local static server for the web build, with the headers shared-memory
 // threads need (cross-origin isolation).
-//   node web/serve.mjs [port] [--game DIR] [--tailscale [httpsPort]] [--relay-tcp PORT|PATH]
+//   node web/serve.mjs [port] [--game DIR] [--tailscale [httpsPort]] [--funnel [httpsPort]] [--relay-tcp PORT|PATH]
+// --funnel publishes the page, WebAssembly build and configured game files publicly.
 // Also serves the online lobby/relay (WebSocket /net, relay.mjs); --relay-tcp adds a
 // raw-TCP endpoint on 127.0.0.1 for native test builds (RT_NET=127.0.0.1:PORT).
 // --tailscale publishes the server on your tailnet over HTTPS (tailscale serve,
 // tailnet only) and removes that again on exit. Plain http://<tailscale ip> is
 // not enough: browsers allow shared-memory threads and OPFS only on https/localhost.
 import { createServer } from 'node:http';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, createReadStream, mkdirSync, readdirSync, statSync } from 'node:fs';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleUpgrade, listenRaw, roomStats } from './relay.mjs';
 import { createAnalytics } from './analytics.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
-// --game DIR (dev only): serve a local game folder at /__dev/game/ so the page's
-// ?devimport can copy it into OPFS without the folder picker. Listens on 127.0.0.1 only.
+// --game DIR: serve game files for automatic browser download into OPFS.
+// The HTTP listener stays on loopback; Tailscale provides public HTTPS.
 const args = process.argv.slice(2);
 const gi = args.indexOf('--game');
 const gameDir = gi >= 0 ? resolve(args.splice(gi, 2)[1]) : null;
-// --game serves the game's files: allowed on localhost and the tailnet, never on a
-// public Tailscale Funnel (that would publish EA's game to the internet)
-let gameBlocked = false;
 const ti = args.indexOf('--tailscale');
 let tsPort = null;
 if (ti >= 0) { tsPort = /^\d+$/.test(args[ti + 1] || '') ? Number(args.splice(ti, 2)[1]) : (args.splice(ti, 1), 10000); }
+const fi = args.indexOf('--funnel');
+const funnel = fi >= 0;
+if (funnel) { tsPort = /^\d+$/.test(args[fi + 1] || '') ? Number(args.splice(fi, 2)[1]) : (args.splice(fi, 1), 443); }
 const ri = args.indexOf('--relay-tcp');
 const rawArg = ri >= 0 ? args.splice(ri, 2)[1] : '';
 const rawPort = /^\d+$/.test(rawArg) ? Number(rawArg) : rawArg;   // port or Unix socket path
@@ -66,17 +67,18 @@ const server = createServer((req, res) => {
   if (req.method === 'POST' && url.pathname === '/__event') { analytics.handleEvent(req, res); return; }
   if (url.pathname === '/__stats') { analytics.handleStats(req, res, roomStats); return; }
   if (req.method === 'POST' && url.pathname === '/__log') { clientLog(req, res); return; }
-  let path = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '');
+  let decoded;
+  try { decoded = decodeURIComponent(url.pathname); } catch { res.writeHead(400).end('invalid path'); return; }
+  let path = normalize(decoded).replace(/^([/\\])+/, '');
   if (path === '' || path.endsWith('/')) path += 'index.html';
   let base = root;
-  if (gameDir && !gameBlocked && path === '__dev/game-list') {
+  if (gameDir && path === '__dev/game-list') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cross-Origin-Resource-Policy': 'same-origin' });
     res.end(JSON.stringify(listFiles(gameDir))); return;
   }
-  if (gameDir && !gameBlocked && path.startsWith('__dev/game/')) { base = gameDir; path = path.slice('__dev/game/'.length); }
-  if (gameBlocked && path.startsWith('dist/')) { res.writeHead(403).end('not available on a public URL'); return; }
+  if (gameDir && path.startsWith('__dev/game/')) { base = gameDir; path = path.slice('__dev/game/'.length); }
   const file = join(base, path);
-  if (!file.startsWith(base)) { res.writeHead(403).end(); return; }
+  if (!file.startsWith(base + sep)) { res.writeHead(403).end(); return; }
   let st;
   try { st = statSync(file); } catch { res.writeHead(404).end('not found'); return; }
   if (st.isDirectory()) { res.writeHead(404).end(); return; }
@@ -88,41 +90,39 @@ const server = createServer((req, res) => {
     'Cross-Origin-Resource-Policy': 'same-origin',
     'Cache-Control': 'no-cache',
   });
-  createReadStream(file).pipe(res);
+  if (req.method === 'HEAD') { res.end(); return; }
+  createReadStream(file).on('error', () => res.destroy()).pipe(res);
 });
 // online play: WebSocket lobby/relay at /net (see relay.mjs)
 server.on('upgrade', (req, sock) => { if (new URL(req.url, 'http://x').pathname === '/net') handleUpgrade(req, sock); else sock.destroy(); });
 if (rawPort) listenRaw(rawPort);
 server.listen(port, '127.0.0.1', () => {
-  console.log(`NFS3 web runtime: http://localhost:${port}/` + (gameDir ? `  (dev game folder: ${gameDir}, open ?devimport)` : ''));
+  console.log(`NFS3 web runtime: http://localhost:${port}/` + (gameDir ? `  (game folder: ${gameDir}, automatic download)` : ''));
   console.log(`stats:            http://localhost:${port}/__stats`);
+  if (funnel && ![443, 8443, 10000].includes(tsPort)) { console.error('Funnel only works on ports 443, 8443 and 10000'); process.exit(1); }
   if (tsPort) startTailscale();
 });
 
-function checkFunnel(ts, name) {
-  try {
-    const st = JSON.parse(ts('serve', 'status', '--json') || '{}');
-    const funnel = Object.entries(st.AllowFunnel || {}).some(([hp, on]) => on && hp.endsWith(':' + tsPort));
-    if (funnel && gameDir && !gameBlocked) {
-      gameBlocked = true;
-      console.error(`!! Tailscale Funnel is on for ${name}:${tsPort}. The site is public, so the game files and the wasm built from nfs3.exe are no longer served.`);
-    }
-  } catch {}
-}
-
-function startTailscale() {
+async function startTailscale() {
   const ts = (...a) => execFileSync('tailscale', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   try {
-    ts('serve', '--bg', `--https=${tsPort}`, `http://127.0.0.1:${port}`);
+    // Activation can wait for account approval: keep serving and show the activation URL.
+    await new Promise((resolve, reject) => {
+      const child = spawn('tailscale', [funnel ? 'funnel' : 'serve', '--bg', `--https=${tsPort}`, `http://127.0.0.1:${port}`], { stdio: 'inherit' });
+      child.once('error', reject);
+      child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`Tailscale exited with code ${code}`)));
+    });
     const name = JSON.parse(ts('status', '--json')).Self.DNSName.replace(/\.$/, '');
-    console.log(`tailnet:          https://${name}${tsPort === 443 ? '' : ':' + tsPort}/` + (gameDir ? '  (game files auto-import for tailnet devices)' : ''));
-    checkFunnel(ts, name);
-    setInterval(() => checkFunnel(ts, name), 30000).unref();
+    const base = `https://${name}${tsPort === 443 ? '' : ':' + tsPort}/`;
+    if (funnel) {
+      console.log(`funnel:           ${base}  (public; game files and WebAssembly are served)`);
+    } else console.log(`tailnet:          ${base}` + (gameDir ? '  (game files download automatically)' : ''));
   } catch (e) {
-    console.error('tailscale serve failed:', (e.stderr || e.message).trim());
+    console.error(`tailscale ${funnel ? 'funnel' : 'serve'} failed:`, (e.stderr || e.message).trim());
+    if (funnel) console.error('(Funnel must be allowed for this machine in the tailnet policy: https://tailscale.com/kb/1223/funnel)');
     console.error('(if it asks for permission: sudo tailscale set --operator=$USER)');
     return;
   }
-  const off = () => { try { ts('serve', `--https=${tsPort}`, 'off'); } catch {} process.exit(0); };
+  const off = () => { try { ts(funnel ? 'funnel' : 'serve', `--https=${tsPort}`, 'off'); } catch {} process.exit(0); };
   process.on('SIGINT', off); process.on('SIGTERM', off);
 }

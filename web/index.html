@@ -234,7 +234,7 @@
       <a class="mbtn" href="#about">Read Me…</a>
       <div class="sep"></div>
       <button id="forget" class="mbtn dim" hidden>Remove Game Files</button>
-      <div class="hint">Your game folder stays in this browser. Nothing is uploaded.</div>
+      <div class="hint">Game files download automatically and are cached in this browser.</div>
       <div class="tip"><b>Tip of the day</b><span id="tip">Hold the handbrake through tight corners to slide around them.</span></div>
     </nav>
 
@@ -305,8 +305,8 @@
         <div class="ph"><h2>How to Race Online</h2></div>
         <div class="pb">
           <ol class="steps">
-            <li><b>Get the game into this browser.</b> Every player needs their own NFS3 folder (PC, modern patch).
-              Click <i>Choose NFS3 Folder…</i> and pick the folder with <b>nfs3.exe</b>. This happens once; next time it's already here.</li>
+            <li><b>Get the game into this browser.</b> Wait for the game files to download automatically.
+              This happens once; next time they are already cached here.</li>
             <li><b>Pick a name.</b> Type it under <i>Online Play → Your name</i>. It's what the others see in the room.</li>
             <li><b>Make a room.</b> One player clicks <i>Create Room</i>, gives it a name, and optionally a password and a player limit (2–8).
               Untick <i>Show in the room list</i> for a private room.</li>
@@ -335,7 +335,7 @@
               <h3 class="minor">Untouched: the real NFS3</h3>
               <ul class="ticks">
                 <li><b>Handling and physics:</b> every car drives exactly like on a 1999 PC. The original code runs, recompiled, not rewritten or re-tuned.</li>
-                <li><b>Cars, tracks, AI and police:</b> the original data from your game folder, the original opponent and Hot Pursuit logic.</li>
+                <li><b>Cars, tracks, AI and police:</b> the original game data, the original opponent and Hot Pursuit logic.</li>
                 <li><b>Music and sound:</b> the original soundtrack and effects through the game's own sound engine.</li>
                 <li><b>Menus and modes:</b> Single Race, Hot Pursuit, Knockout, Tournament, Showcase, as you remember them.</li>
               </ul>
@@ -347,12 +347,12 @@
                 <li><b>Voodoo2 on your GPU:</b> the 3dfx Glide graphics path is redrawn with WebGL 2, keeping the Voodoo fog, depth and blending, and scaled up sharply.</li>
                 <li><b>Internet multiplayer:</b> the game's LAN mode now works over the internet. Rooms with passwords and a room browser,
                   direct browser-to-browser links, lost packets recovered in one tick, and a best-host pick so the lag goes to the fewest players.</li>
-                <li><b>Browser comfort:</b> one-time import into private storage, mouse capture, audio, smart pacing when the tab is hidden.</li>
+                <li><b>Browser comfort:</b> one-time download into browser storage, mouse capture, audio, smart pacing when the tab is hidden.</li>
               </ul>
             </div>
           </div>
           <p class="muted credit-line">Built on the <a href="https://veg.by/en/projects/nfs3/" target="_blank" rel="noopener">NFS3 Modern Patch</a>
-            by VEG (HD and widescreen support, 200+ fixes). Your game folder needs it installed.</p>
+            by VEG (HD and widescreen support, 200+ fixes). The hosted game files include this patch.</p>
         </div>
       </section>
 
@@ -360,8 +360,8 @@
         <div class="ph"><h2>Read Me</h2></div>
         <div class="pb">
           <p>This page runs <b>Need for Speed III: Hot Pursuit</b> (PC, modern patch) straight in your browser: the original
-            game code is recompiled from <i>your</i> copy, and the Voodoo2 graphics go through WebGL. Bring your own game:
-            pick the folder with <b>nfs3.exe</b>, <b>fedata</b> and <b>gamedata</b> once, and it is kept in this browser's private storage.</p>
+            game code is recompiled to WebAssembly, and the Voodoo2 graphics go through WebGL.
+            Game files download from this server automatically and are cached in this browser for future visits.</p>
           <dl class="specs">
             <dt>Browser</dt><dd>Chrome, Edge, Firefox or Safari with WebGL&nbsp;2</dd>
             <dt>Controls</dt><dd>Keyboard like the original; click the picture to capture the mouse, Esc releases it</dd>
@@ -385,12 +385,12 @@
       <div class="badge b1">WebGL 2.0<br>Accelerated</div>
       <div class="badge b2">Best viewed<br>1024×768</div>
       <div class="badge b3">WASM<br>inside</div>
-      <div class="badge b4">Bring your<br>own game</div>
+      <div class="badge b4">Open page<br>and race</div>
     </div>
     <div class="credits">
       <div>Made by <a href="https://github.com/mrz944" target="_blank" rel="noopener">Marcin Zadka</a> ·
         source on <a href="https://github.com/mrz944/nfs3-web" target="_blank" rel="noopener">GitHub</a></div>
-      <div>Fan-made runtime · not affiliated with Electronic Arts · no game files are hosted here</div>
+      <div>Fan-made runtime · not affiliated with Electronic Arts</div>
     </div>
   </footer>
 </main>
