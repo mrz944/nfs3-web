@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Source of web/icons/og.png (1200x630 social preview). Render:
+     firefox --headless --no-remote --profile <tmp> --window-size=1200,630 --screenshot web/icons/og.png file://$PWD/docs/og-card.html -->
+<html><head><meta charset="utf-8"><style>
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #010622; font-family: Verdana, "DejaVu Sans", sans-serif; color: #eef2ff; }
+  .bg { position: absolute; inset: 0; background: radial-gradient(ellipse 75% 85% at 72% 50%, #2350e8 0%, #0e2fa8 28%, #061a72 52%, #030b3d 78%, #010622 100%); }
+  .ring { position: absolute; border-radius: 50%; left: 72%; top: 50%; transform: translate(-50%, -50%); }
+  .r1 { width: 1250px; height: 1250px; border: 95px solid rgba(30, 70, 220, .22); }
+  .r2 { width: 780px; height: 780px; border: 28px solid rgba(90, 140, 255, .15); }
+  .r3 { width: 430px; height: 430px; border: 10px solid rgba(160, 200, 255, .12); }
+  .stripes { position: absolute; right: 0; top: 0; bottom: 0; width: 260px; background: repeating-linear-gradient(0deg, rgba(150, 190, 255, .12) 0 2px, transparent 2px 9px);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000); mask-image: linear-gradient(90deg, transparent, #000); }
+  .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .16) 0 1px, transparent 1px 3px); }
+  svg.arc { position: absolute; inset: 0; }
+  .orb { position: absolute; left: 70px; top: 70px; width: 150px; height: 150px; border-radius: 50%;
+    background: radial-gradient(circle at 36% 30%, #b9dcff 0 6%, #4b8dff 16%, #1442c8 42%, #061a6e 70%, #020a35 100%);
+    box-shadow: 0 0 0 8px #0a1c66, 0 0 0 11px #4d7cff, 0 0 0 17px #0a1c66, 0 0 40px 12px rgba(70, 130, 255, .55);
+    display: grid; place-items: center; font: italic 900 46px "Arial Black", "DejaVu Sans", sans-serif; color: #e1f0ff; text-shadow: 0 3px 0 #031047, 0 0 14px rgba(140, 190, 255, .9); letter-spacing: -2px; }
+  .txt { position: absolute; left: 70px; top: 262px; }
+  .kick { font: bold 22px Verdana, sans-serif; letter-spacing: .34em; text-transform: uppercase; color: #9fc0ff; }
+  h1 { margin: 6px 0 0; font: italic 900 96px/0.98 "Arial Black", "DejaVu Sans", sans-serif; text-transform: uppercase; letter-spacing: -1px;
+    background: linear-gradient(180deg, #fff6b0 0%, #ffd000 45%, #ff9900 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(4px 4px 0 #2a1400) drop-shadow(0 0 18px rgba(255, 190, 0, .35)); }
+  h1 span { display: block; font-size: 62px; color: transparent; }
+  .tags { margin-top: 30px; display: flex; gap: 14px; }
+  .tag { font: bold 21px Verdana, sans-serif; color: #fff; padding: 9px 30px 9px 20px; background: linear-gradient(180deg, #4459c0 0%, #24348c 45%, #141f63 100%);
+    border-radius: 22px 4px 4px 22px; clip-path: polygon(0 0, 100% 0, calc(100% - 16px) 100%, 0 100%); text-shadow: 0 1px 1px #000; }
+  .tag.go { background: linear-gradient(180deg, #ffe76a 0%, #ffc400 45%, #e88a00 100%); color: #1a0d00; text-shadow: none; }
+</style></head><body>
+  <div class="bg"></div><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+  <div class="stripes"></div>
+  <svg class="arc" viewBox="0 0 1200 630"><path d="M600 40 C 820 26, 1020 70, 1180 160" fill="none" stroke="#ffd000" stroke-width="7" stroke-linecap="round"/>
+    <path d="M640 600 C 860 560, 1040 520, 1200 440" fill="none" stroke="#ffd000" stroke-opacity=".5" stroke-width="4"/></svg>
+  <div class="orb">III</div>
+  <div class="txt">
+    <div class="kick">Play in your browser</div>
+    <h1>NFS3<span>Hot Pursuit</span></h1>
+    <div class="tags"><div class="tag go">No install</div><div class="tag">Online multiplayer</div><div class="tag">WebGL&nbsp;2</div></div>
+  </div>
+  <div class="scan"></div>
+</body></html>

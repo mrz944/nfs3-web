@@ -3,7 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NFS3 Web Runtime</title>
+<title>NFS3 Hot Pursuit</title>
+<meta name="description" content="Need for Speed III: Hot Pursuit (1998) recompiled to run in your browser. Original handling, tracks and music, no install, online multiplayer with friends.">
+<meta name="theme-color" content="#030b3d">
+<meta name="author" content="Marcin Zadka">
+<link rel="canonical" href="https://nfs3.xyz/">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="NFS3 Hot Pursuit">
+<meta property="og:title" content="NFS3 Hot Pursuit, in your browser">
+<meta property="og:description" content="The 1998 classic, recompiled for the web. Original handling, tracks and music, no install, online races with friends.">
+<meta property="og:url" content="https://nfs3.xyz/">
+<meta property="og:image" content="https://nfs3.xyz/icons/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="NFS3 Hot Pursuit: play in your browser. No install, online multiplayer, WebGL 2.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="NFS3 Hot Pursuit, in your browser">
+<meta name="twitter:description" content="The 1998 classic, recompiled for the web. No install, online races with friends.">
+<meta name="twitter:image" content="https://nfs3.xyz/icons/og.png">
 <!--
   Look: the game's own front end circa 1998-2002 (deep blue, big rings, gold arc,
   yellow italic headings, pill buttons that light up), as a fan page from that era.
@@ -83,6 +104,9 @@
   .menu .sep { height: 1px; background: linear-gradient(90deg, transparent, var(--line), transparent); margin: 4px 0; }
   .menu .hint { color: var(--muted); font-size: 11px; padding: 0 6px; }
   .tip { margin-top: 10px; border: 1px solid var(--line); border-top: 2px solid var(--gold); background: rgba(3, 10, 52, .7); padding: 8px 10px; font-size: 11px; color: #d0d9fb; }
+  .maker { margin-top: 10px; border: 1px solid var(--line); border-left: 3px solid var(--gold); background: rgba(3, 10, 52, .7); padding: 8px 10px; font-size: 11px; color: #d0d9fb; line-height: 1.6; }
+  .maker b { display: block; font: italic 900 12px var(--head); color: var(--gold); text-transform: uppercase; letter-spacing: .06em; }
+  .maker a { color: #fff; font-weight: bold; text-decoration: none; } .maker a:hover { color: #ffe23a; text-decoration: underline; }
   .tip b { display: block; font: italic 900 12px var(--head); color: var(--gold); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
 
   /* small buttons inside panels */
@@ -236,6 +260,9 @@
       <button id="forget" class="mbtn dim" hidden>Remove Game Files</button>
       <div class="hint">Game files download automatically and are cached in this browser.</div>
       <div class="tip"><b>Tip of the day</b><span id="tip">Hold the handbrake through tight corners to slide around them.</span></div>
+      <div class="maker"><b>Created by</b>
+        <a href="https://github.com/mrz944" target="_blank" rel="noopener">Marcin Zadka</a><br>
+        Source on <a href="https://github.com/mrz944/nfs3-web" target="_blank" rel="noopener">GitHub ›</a></div>
     </nav>
 
     <div class="panels" id="setup">
@@ -388,8 +415,6 @@
       <div class="badge b4">Open page<br>and race</div>
     </div>
     <div class="credits">
-      <div>Made by <a href="https://github.com/mrz944" target="_blank" rel="noopener">Marcin Zadka</a> ·
-        source on <a href="https://github.com/mrz944/nfs3-web" target="_blank" rel="noopener">GitHub</a></div>
       <div>Fan-made runtime · not affiliated with Electronic Arts</div>
     </div>
   </footer>
