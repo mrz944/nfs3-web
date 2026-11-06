@@ -298,9 +298,23 @@ GL_(GetString) {
 }
 GL_(QueryResolutions) {
     (void)c;
-    /* one entry: 640x480 @60, 2 color buffers, 1 aux */
-    if (A(1)) { uint32_t r[4] = { 0x7, 0, 2, 1 }; memcpy(G + A(1), r, 16); }
-    return 16;
+    /* the 4:3 modes a later Voodoo / nGlide offers (the game lists them in its graphics
+     * options): 640x480, 800x600, 1024x768, 1280x960, 1600x1200; @60 Hz, 2 color buffers,
+     * 1 aux. A template with a set resolution (not GR_QUERY_ANY) narrows the list. */
+    static const uint32_t all[] = { 0x7, 0x8, 0xc };
+    uint32_t modes[8], nm = 0;
+    const char *e = getenv("RT_GLIDE_MODES");     /* e.g. "c" = only 1024x768 (testing) */
+    if (e && *e) { for (char *q = (char *)e; *q && nm < 8;) { modes[nm++] = (uint32_t)strtoul(q, &q, 16); while (*q == ',') q++; } }
+    else for (unsigned i = 0; i < sizeof all / sizeof *all; i++) modes[nm++] = all[i];
+    uint32_t want = A(0) ? RD32(A(0)) : 0xFFFFFFFFu, n = 0;
+    if (want > 0x17) want = 0xFFFFFFFFu;          /* not a GR_RESOLUTION_* code: list all */
+    for (unsigned i = 0; i < nm; i++) {
+        if (want != 0xFFFFFFFFu && want != modes[i]) continue;
+        if (A(1)) { uint32_t r[4] = { modes[i], 0, 2, 1 }; memcpy(G + A(1) + n * 16, r, 16); }
+        n++;
+    }
+    static int logged; if (logged++ < 40) rt_log("grQueryResolutions(want %#x): %u mode(s)", want, n);
+    return (int)(n * 16);
 }
 static const int res_w[] = { 320, 320, 400, 512, 640, 640, 640, 640, 800, 960, 856, 512, 1024, 1280, 1600, 400, 1152, 1280, 1600, 1792, 1856, 1920, 2048, 2048 };
 static const int res_h[] = { 200, 240, 256, 384, 200, 350, 400, 480, 600, 720, 480, 256, 768, 1024, 1200, 300, 864, 960, 1024, 1344, 1392, 1440, 1536, 2048 };
