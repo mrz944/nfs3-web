@@ -115,6 +115,16 @@
     font: italic 900 13px var(--head); color: #1a0d00; background: linear-gradient(180deg, #ffe76a, #ffc400 50%, #e88a00); border-radius: 11px 2px 2px 11px; }
   .steps li b { color: #fff; }
   .steps + .specs { margin-top: 12px; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+  h3.minor { margin: 0 0 6px; font: bold 12px var(--ui); color: #fff; text-transform: uppercase; letter-spacing: .1em; }
+  h3.minor::before { content: "» "; color: var(--gold); }
+  .ticks { list-style: none; margin: 0; padding: 0; }
+  .ticks li { position: relative; padding: 5px 0 5px 22px; color: #d6defc; border-bottom: 1px solid rgba(120, 150, 255, .12); }
+  .ticks li::before { content: "✔"; position: absolute; left: 2px; top: 5px; color: var(--ok); font-weight: bold; }
+  .ticks.plus li::before { content: "+"; color: var(--gold); font: 900 15px/1 var(--head); top: 7px; }
+  .ticks b { color: #fff; }
+  .credit-line { margin-top: 12px !important; font-size: 12px; } .credit-line a { color: var(--gold); }
   .specs dt { color: var(--gold); font-weight: bold; } .specs dd { margin: 0; color: #d6defc; }
 
   /* ---------------------------------------------------------- online lobby */
@@ -220,6 +230,7 @@
       <label class="btn mbtn" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
       <a class="mbtn" href="#online">Online Play…</a>
       <a class="mbtn" href="#guide">How to Race Online…</a>
+      <a class="mbtn" href="#work">Original &amp; Our Work…</a>
       <a class="mbtn" href="#about">Read Me…</a>
       <div class="sep"></div>
       <button id="forget" class="mbtn dim" hidden>Remove Game Files</button>
@@ -313,6 +324,35 @@
             <dt>Keep it visible</dt><dd>Leave every game window open while racing. A minimised tab can fall behind.</dd>
             <dt>Names</dt><dd>The name inside the game's own lobby is the game's <i>Player 1 Name</i> setting. Change it there to match.</dd>
           </dl>
+        </div>
+      </section>
+
+      <section class="panel" id="work">
+        <div class="ph"><h2>Original Game · Our Work</h2></div>
+        <div class="pb">
+          <div class="twocol">
+            <div>
+              <h3 class="minor">Untouched: the real NFS3</h3>
+              <ul class="ticks">
+                <li><b>Handling and physics:</b> every car drives exactly like on a 1999 PC. The original code runs, recompiled, not rewritten or re-tuned.</li>
+                <li><b>Cars, tracks, AI and police:</b> the original data from your game folder, the original opponent and Hot Pursuit logic.</li>
+                <li><b>Music and sound:</b> the original soundtrack and effects through the game's own sound engine.</li>
+                <li><b>Menus and modes:</b> Single Race, Hot Pursuit, Knockout, Tournament, Showcase, as you remember them.</li>
+              </ul>
+            </div>
+            <div>
+              <h3 class="minor">Added: what makes it run here</h3>
+              <ul class="ticks plus">
+                <li><b>Static recompilation:</b> the game's x86 code is translated to C and WebAssembly, so it runs natively in the browser with no PC emulator.</li>
+                <li><b>Voodoo2 on your GPU:</b> the 3dfx Glide graphics path is redrawn with WebGL 2, keeping the Voodoo fog, depth and blending, and scaled up sharply.</li>
+                <li><b>Internet multiplayer:</b> the game's LAN mode now works over the internet. Rooms with passwords and a room browser,
+                  direct browser-to-browser links, lost packets recovered in one tick, and a best-host pick so the lag goes to the fewest players.</li>
+                <li><b>Browser comfort:</b> one-time import into private storage, mouse capture, audio, smart pacing when the tab is hidden.</li>
+              </ul>
+            </div>
+          </div>
+          <p class="muted credit-line">Built on the <a href="https://veg.by/en/projects/nfs3/" target="_blank" rel="noopener">NFS3 Modern Patch</a>
+            by VEG (HD and widescreen support, 200+ fixes). Your game folder needs it installed.</p>
         </div>
       </section>
 

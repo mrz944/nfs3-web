@@ -67,7 +67,10 @@ async function sha256(blob) {
   return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// dev: `node web/serve.mjs --game DIR` + ?devimport fetches the folder from the local server
+// `node web/serve.mjs --game DIR`: the page copies that folder from the server (no folder picker)
+async function serverHasGame() {
+  try { const r = await fetch('__dev/game-list', { method: 'HEAD' }); return r.ok; } catch { return false; }
+}
 async function devFiles() {
   const list = await (await fetch('__dev/game-list')).json();
   return list.map(([path, size]) => ({
@@ -486,8 +489,12 @@ async function init() {
     await root.removeEntry(GAME_DIR, { recursive: true }).catch(() => {});
     await refresh();
   });
-  if (new URLSearchParams(location.search).has('devimport') && !(await hasGame())) {
-    try { await importFolder(await devFiles()); } catch (err) { status(err.message, true); return; }
+  // a server started with --game offers its game folder: import it automatically
+  // (tailnet-only test setups); ?devimport forces the attempt and reports errors
+  const forced = new URLSearchParams(location.search).has('devimport');
+  if (!(await hasGame()) && (forced || await serverHasGame())) {
+    status('Copying the game files from the server into this browser…');
+    try { await importFolder(await devFiles()); track('import', { from: 'server' }); } catch (err) { status(err.message, true); return; }
   }
   if (new URLSearchParams(location.search).has('autostart') && (await hasGame())) { start().catch((e) => { console.error('Failed to start:', e.stack || e); status('Failed to start: ' + e.message, true); $('setup-wrap').hidden = false; }); }
   $('start').addEventListener('click', () => start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }));

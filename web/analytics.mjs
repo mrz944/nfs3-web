@@ -92,7 +92,7 @@ table{border-collapse:collapse;width:100%;font-size:12px}th{text-align:left;colo
       card('visitors (per-day unique)', [...days.values()].reduce((n, d) => n + d.visitors.size, 0)),
       card('page views', views.length), card('game starts', starts.length), card('online game starts', by('online_start').length),
       card('rooms created', by('room_create').length), card('median load to first frame', loadS != null ? loadS.toFixed(1) + ' s' : '–'),
-      card('median play time', playM != null ? playM.toFixed(1) + ' min' : '–'), card('median fps', fps ?? '–'), card('errors', by('error').length),
+      card('median play time', playM != null ? playM.toFixed(1) + ' min' : '–'), card('median fps', fps != null ? Math.round(fps) : '–'), card('errors', by('error').length),
       card('racers online now', rooms.reduce((n, r) => n + r.players.length, 0)),
     ].join('')}</div>
 <h2>By day</h2><div class="wrap">${table(['day', 'visitors', 'views', 'game starts', 'online starts', 'errors'], [...days].sort((a, b) => b[0].localeCompare(a[0])).map(([d, x]) => [d, x.visitors.size, x.views, x.starts, x.online, x.errors]))}</div>

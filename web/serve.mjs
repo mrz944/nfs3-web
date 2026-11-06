@@ -20,6 +20,9 @@ const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const args = process.argv.slice(2);
 const gi = args.indexOf('--game');
 const gameDir = gi >= 0 ? resolve(args.splice(gi, 2)[1]) : null;
+// --game serves the game's files: allowed on localhost and the tailnet, never on a
+// public Tailscale Funnel (that would publish EA's game to the internet)
+let gameBlocked = false;
 const ti = args.indexOf('--tailscale');
 let tsPort = null;
 if (ti >= 0) { tsPort = /^\d+$/.test(args[ti + 1] || '') ? Number(args.splice(ti, 2)[1]) : (args.splice(ti, 1), 10000); }
@@ -66,11 +69,12 @@ const server = createServer((req, res) => {
   let path = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '');
   if (path === '' || path.endsWith('/')) path += 'index.html';
   let base = root;
-  if (gameDir && path === '__dev/game-list') {
+  if (gameDir && !gameBlocked && path === '__dev/game-list') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cross-Origin-Resource-Policy': 'same-origin' });
     res.end(JSON.stringify(listFiles(gameDir))); return;
   }
-  if (gameDir && path.startsWith('__dev/game/')) { base = gameDir; path = path.slice('__dev/game/'.length); }
+  if (gameDir && !gameBlocked && path.startsWith('__dev/game/')) { base = gameDir; path = path.slice('__dev/game/'.length); }
+  if (gameBlocked && path.startsWith('dist/')) { res.writeHead(403).end('not available on a public URL'); return; }
   const file = join(base, path);
   if (!file.startsWith(base)) { res.writeHead(403).end(); return; }
   let st;
@@ -95,12 +99,25 @@ server.listen(port, '127.0.0.1', () => {
   if (tsPort) startTailscale();
 });
 
+function checkFunnel(ts, name) {
+  try {
+    const st = JSON.parse(ts('serve', 'status', '--json') || '{}');
+    const funnel = Object.entries(st.AllowFunnel || {}).some(([hp, on]) => on && hp.endsWith(':' + tsPort));
+    if (funnel && gameDir && !gameBlocked) {
+      gameBlocked = true;
+      console.error(`!! Tailscale Funnel is on for ${name}:${tsPort}. The site is public, so the game files and the wasm built from nfs3.exe are no longer served.`);
+    }
+  } catch {}
+}
+
 function startTailscale() {
   const ts = (...a) => execFileSync('tailscale', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     ts('serve', '--bg', `--https=${tsPort}`, `http://127.0.0.1:${port}`);
     const name = JSON.parse(ts('status', '--json')).Self.DNSName.replace(/\.$/, '');
-    console.log(`tailnet:          https://${name}${tsPort === 443 ? '' : ':' + tsPort}/` + (gameDir ? '?devimport&autostart' : ''));
+    console.log(`tailnet:          https://${name}${tsPort === 443 ? '' : ':' + tsPort}/` + (gameDir ? '  (game files auto-import for tailnet devices)' : ''));
+    checkFunnel(ts, name);
+    setInterval(() => checkFunnel(ts, name), 30000).unref();
   } catch (e) {
     console.error('tailscale serve failed:', (e.stderr || e.message).trim());
     console.error('(if it asks for permission: sudo tailscale set --operator=$USER)');
