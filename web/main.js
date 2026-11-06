@@ -34,7 +34,7 @@ for (const k of ['log', 'warn', 'error']) { const orig = console[k].bind(console
 window.addEventListener('error', (e) => log('ERROR', e.message, e.filename ? `${e.filename}:${e.lineno}` : ''));
 window.addEventListener('unhandledrejection', (e) => log('ERROR (promise)', e.reason?.stack || e.reason));
 
-import { Net, newRoomCode } from './net.js';
+import { Net } from './net.js';
 
 const GAME_DIR = 'nfs3';
 const net = new Net();
@@ -215,13 +215,7 @@ async function start() {
   $('start').disabled = true;
   status('Loading the recompiled game…');
   await ensureIni();
-  const room = roomFromHash();
-  if (room) {
-    const name = ($('pname').value.trim() || 'Player').slice(0, 16);
-    status(`Joining online room ${room}…`);
-    const w = await net.join(room, name);
-    log(`online: room ${w.room}, ${w.peers.length + 1} player(s), node ${w.id}`);
-  }
+  if (net.id) log(`online: room ${net.room} "${net.info?.name}", ${net.peers.size + 1} player(s), node ${net.id}`);
   log('loading dist/nfs3.js');
   const { default: NFS3 } = await import('./dist/nfs3.js');
   log('instantiating wasm + starting worker pool (cores:', navigator.hardwareConcurrency + ')');
@@ -236,10 +230,11 @@ async function start() {
     printErr: (t) => console.log(t),
   });
   log('runtime ready, game thread running');
-  if (net.id) { mod.ccall('rt_net_set_node', null, ['string'], [net.id]); net.attach(mod); showNetBadge(); }
+  if (net.id) { mod.ccall('rt_net_set_node', null, ['string'], [net.id]); net.attach(mod); net.setState('game'); showNetBadge(); }
   // keep the log over the game until frames arrive (always with ?log)
   const keepLog = new URLSearchParams(location.search).has('log');
   $('log').classList.add('overlay'); document.body.appendChild($('log'));
+  gameStarted = true;
   $('setup-wrap').hidden = true;
   $('screen').style.display = 'block';
   $('hint').hidden = false;
@@ -275,32 +270,154 @@ function showNetBadge() {
   const b = $('netbadge');
   const draw = () => {
     const s = net.summary();
-    b.textContent = `Room ${s.room} · ${s.players} player${s.players === 1 ? '' : 's'}` + (s.peers.length ? ' · ' + s.peers.join(' · ') : ' · waiting for friends')
+    b.textContent = `${s.name || 'Room ' + s.room} · ${s.players} player${s.players === 1 ? '' : 's'}` + (s.peers.length ? ' · ' + s.peers.join(' · ') : ' · waiting for friends')
       + (s.best ? ` · best host: ${s.best.name}${s.best.me ? ' (create the game)' : ''}` : '');
   };
   b.hidden = false; draw();
   net.addEventListener('status', draw);
-  net.addEventListener('log', (e) => log('online:', e.detail));
   b.onclick = () => navigator.clipboard?.writeText(roomLink(net.room)).then(() => { b.textContent = 'Room link copied'; setTimeout(draw, 1200); });
 }
+
+// ------------------------------------------------------------------ lobby
+// Room browser and room page. Rooms live on the relay (relay.mjs); we join
+// before Start so everyone sees each other (and WebRTC links come up) early.
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+const pingClass = (ms) => (ms < 60 ? 'ping-good' : ms < 130 ? 'ping-ok' : 'ping-bad');
+const savedPass = (code) => { try { return sessionStorage.getItem('nfs3.pass.' + code) || ''; } catch { return ''; } };
+const savePass = (code, pw) => { try { pw ? sessionStorage.setItem('nfs3.pass.' + code, pw) : sessionStorage.removeItem('nfs3.pass.' + code); } catch {} };
+let gameStarted = false;
 
 function setupOnline() {
   const name = $('pname');
   try { name.value = localStorage.getItem('nfs3.name') || ''; } catch {}
-  name.addEventListener('change', () => { try { localStorage.setItem('nfs3.name', name.value.trim()); } catch {} });
-  const refresh = () => {
-    const room = roomFromHash();
-    $('create-room').hidden = !!room; $('leave-room').hidden = !room; $('share').hidden = !room; $('howto').hidden = !room;
-    $('share-link').textContent = room ? roomLink(room) : '';
-    $('online-status').textContent = room
-      ? `You're in online room ${room}. Everyone who opens this link joins the same room.`
-      : 'Race friends in their browsers. Create a room and send them the link.';
+  name.addEventListener('input', () => { try { localStorage.setItem('nfs3.name', name.value.trim()); } catch {} });
+  const myName = () => name.value.trim().slice(0, 16);
+  const needName = () => {
+    if (myName()) return false;
+    message('Enter your name first.'); name.focus(); return true;
   };
-  $('create-room').addEventListener('click', () => { location.hash = 'room=' + newRoomCode(); });
-  $('leave-room').addEventListener('click', () => { history.replaceState(null, '', location.pathname + location.search); refresh(); });
-  $('copy-link').addEventListener('click', () => navigator.clipboard?.writeText(roomLink(roomFromHash())).then(() => { $('copy-link').textContent = 'Copied'; setTimeout(() => { $('copy-link').textContent = 'Copy link'; }, 1200); }));
-  window.addEventListener('hashchange', refresh);
-  refresh();
+  const message = (t) => { $('lobby-msg').textContent = t || ''; $('lobby-msg').hidden = !t; };
+  const server = (t, cls = '') => { $('server-state').textContent = t; $('server-state').className = 'pill ' + cls; };
+  let joining = null;          // room code waiting for a password
+
+  // ---- room list
+  function drawRooms() {
+    const tb = $('rooms').tBodies[0]; tb.textContent = '';
+    const rooms = [...net.rooms].sort((a, b) => (a.racing - b.racing) || (b.players.length - a.players.length) || (b.created - a.created));
+    $('rooms-empty').hidden = rooms.length > 0; $('rooms').hidden = !rooms.length;
+    for (const r of rooms) {
+      const full = r.players.length >= r.max;
+      const rtts = r.players.map((p) => p.rtt).filter((x) => x != null);
+      const ping = net.relayRtt != null && rtts.length ? Math.round(net.relayRtt + rtts.reduce((a, b) => a + b, 0) / rtts.length) : null;
+      const title = el('div', { className: 'rname', textContent: r.name });
+      if (r.locked) title.append(el('span', { className: 'tag', textContent: 'password', title: 'Needs a password' }));
+      if (r.racing) title.append(el('span', { className: 'tag race', textContent: 'racing', title: 'Someone in this room is in the game' }));
+      const who = el('div', { className: 'sub', textContent: r.players.map((p) => p.name).join(', ') });
+      const join = el('button', { className: 'small', textContent: full ? 'Full' : 'Join', disabled: full || !!net.id });
+      join.onclick = () => joinRoom(r.code, r.locked ? null : '', r.name);
+      tb.append(el('tr', {},
+        el('td', {}, title, who),
+        el('td', { textContent: `${r.players.length}/${r.max}` }),
+        el('td', { className: ping != null ? pingClass(ping) : '', textContent: ping != null ? `${ping} ms` : '–' }),
+        el('td', {}, join)));
+    }
+  }
+
+  // ---- in a room
+  function drawRoom() {
+    const inRoom = !!net.id;
+    $('lobby').hidden = inRoom || gameStarted; $('inroom').hidden = !inRoom || gameStarted;
+    if (!inRoom) return;
+    $('room-title').textContent = net.info?.name || net.room;
+    if (net.info?.locked) $('room-title').append(el('span', { className: 'tag', textContent: 'password' }));
+    const ul = $('members'); ul.textContent = '';
+    ul.append(el('li', {}, el('span', { textContent: `${myName() || 'Player'} (you)` }), el('span', { className: 'muted', textContent: net.relayRtt != null ? `server ${Math.round(net.relayRtt)} ms` : '' })));
+    for (const p of net.peers.values()) {
+      const r = net.rttTo(p);
+      const right = el('span', {},
+        el('span', { className: r != null ? pingClass(r) : 'muted', textContent: r != null ? `${Math.round(r)} ms` : '…' }),
+        el('span', { className: 'muted', textContent: ` · ${p.direct ? 'direct' : 'via server'}${p.state === 'game' ? ' · in game' : ''}` }));
+      ul.append(el('li', {}, el('span', { textContent: p.name }), right));
+    }
+    if (!net.peers.size) ul.append(el('li', {}, el('span', { className: 'muted', textContent: 'Waiting for friends… send them the invite link.' })));
+    const best = net.bestHost();
+    $('best-host').textContent = best ? `Best host: ${best.me ? 'you' : best.name} (worst ping to anyone ${best.worst} ms). The host has no input lag; everyone else has one round trip to the host.` : '';
+    $('share-link').textContent = roomLink(net.room);
+  }
+  const redraw = () => { drawRooms(); drawRoom(); };
+
+  async function joinRoom(code, password, label) {
+    if (needName()) return;
+    if (password == null) { askPassword(code, label); return; }
+    message('');
+    try {
+      await net.join(code, myName(), password);
+      savePass(code, password);
+      history.replaceState(null, '', '#room=' + code);
+      $('pass-form').hidden = true; joining = null;
+    } catch (e) {
+      if (e.code === 'password') { askPassword(code, label, e.message); return; }
+      message(e.message);
+      if (e.code === 'gone') history.replaceState(null, '', location.pathname + location.search);
+    }
+    redraw();
+  }
+  function askPassword(code, label, err) {
+    joining = code;
+    $('pass-label').textContent = `Password for ${label || code}`;
+    $('pass-form').hidden = false; $('create-form').hidden = true;
+    if (err) message(err);
+    $('j-pass').value = ''; $('j-pass').focus();
+  }
+  $('pass-form').addEventListener('submit', (e) => { e.preventDefault(); if (joining) joinRoom(joining, $('j-pass').value); });
+  $('j-cancel').onclick = () => { $('pass-form').hidden = true; joining = null; message(''); };
+
+  $('show-create').onclick = () => {
+    if (needName()) return;
+    $('create-form').hidden = false; $('pass-form').hidden = true;
+    if (!$('c-name').value) $('c-name').value = `${myName()}'s room`;
+    $('c-name').focus();
+  };
+  $('c-cancel').onclick = () => { $('create-form').hidden = true; };
+  $('create-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (needName()) return;
+    message('');
+    const pw = $('c-pass').value;
+    try {
+      const w = await net.create({ name: $('c-name').value.trim(), password: pw, max: Number($('c-max').value), listed: $('c-listed').checked }, myName());
+      savePass(w.room, pw);
+      history.replaceState(null, '', '#room=' + w.room);
+      $('create-form').hidden = true;
+    } catch (err) { message(err.message); }
+    redraw();
+  });
+  $('leave-room').onclick = () => { net.leave(); history.replaceState(null, '', location.pathname + location.search); redraw(); };
+  $('copy-link').onclick = () => navigator.clipboard?.writeText(roomLink(net.room)).then(() => {
+    $('copy-link').textContent = 'Copied'; setTimeout(() => { $('copy-link').textContent = 'Copy invite link'; }, 1200);
+  });
+
+  net.addEventListener('rooms', redraw);
+  net.addEventListener('status', drawRoom);
+  net.addEventListener('log', (e) => log('online:', e.detail));
+  net.addEventListener('disconnected', () => { server('offline', 'bad'); redraw(); if (!gameStarted) setTimeout(connect, 3000); });
+
+  // invite links (#room=code) join straight away (asking for the password if needed)
+  async function connect() {
+    server('connecting…');
+    try { await net.connect(); } catch (e) { server('offline', 'bad'); setTimeout(connect, 3000); return; }
+    server('online', 'ok');
+    const code = roomFromHash();
+    if (code && !net.id) {
+      if (myName()) joinRoom(code, savedPass(code), code);
+      else { message('Enter your name, then join the room from the invite link.'); name.focus();
+        name.addEventListener('change', () => { if (!net.id && roomFromHash() === code) joinRoom(code, savedPass(code), code); }, { once: true }); }
+    }
+    redraw();
+  }
+  window.addEventListener('hashchange', () => { const c = roomFromHash(); if (c && c !== net.room && !net.id) joinRoom(c, savedPass(c), c); });
+  redraw();
+  connect();
 }
 
 async function init() {

@@ -9,78 +9,143 @@
 //   WebSocket  GET /net            browsers
 //   raw TCP    (optional port)     native test builds: frames = u32 len | u8 kind | body
 // Messages (kind 0 = JSON text, kind 1 = binary packet):
-//   -> {t:'hello', room, name}            <- {t:'welcome', id, room, peers:[{id,name}]}
+//   -> {t:'list'}                         <- {t:'rooms', rooms:[...]} now and on every change (room browser)
+//   -> {t:'create', room:{name, password, max, listed}, name}
+//   -> {t:'hello', room, name, password, mustExist}
+//                                         <- {t:'welcome', id, room, info, peers:[{id,name,state}]} | {t:'error', code, error}
+//   -> {t:'leave'}
 //   <- {t:'join', id, name} / {t:'leave', id}
+//   -> {t:'state', state}                 <- {t:'state', id, state}       ('lobby' | 'game')
 //   -> {t:'signal', to, data}             <- {t:'signal', from, data}      (WebRTC)
-//   -> {t:'ping', ts}                     <- {t:'pong', ts}
-//   -> {t:'info', data}                   <- {t:'info', from, data}        (to everyone: ping tables)
+//   -> {t:'ping', ts, rtt}                <- {t:'pong', ts}                (rtt = the client's last round trip to us)
+//   -> {t:'info', data}                   <- {t:'info', from, data}        (to the room: ping tables)
 //   -> binary [dst node 6][payload]       <- binary [src node 6][payload]  (dst ff.. = everyone)
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer as createTcpServer } from 'node:net';
 import { rmSync } from 'node:fs';
 
-const rooms = new Map();         // room name -> Map(idHex -> client)
+const rooms = new Map();         // code -> Room
+const watchers = new Set();      // clients looking at the room browser
 const MAX_ROOM = 8;              // NFS3 races take up to 8 players
 const BCAST = 'ffffffffffff';
+const CODE_ABC = 'abcdefghjkmnpqrstuvwxyz23456789';
 
-function roomOf(name) {
-  if (!rooms.has(name)) rooms.set(name, new Map());
-  return rooms.get(name);
+const clean = (v, n) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, n);
+const hashPw = (salt, pw) => createHash('sha256').update(salt + '\0' + pw).digest();
+function newCode() {
+  for (;;) {
+    const c = Array.from(randomBytes(6), (b) => CODE_ABC[b % CODE_ABC.length]).join('');
+    if (!rooms.has(c)) return c;
+  }
+}
+function newRoom(code, { name, password, max, listed } = {}, owner = '') {
+  const pw = clean(password, 64), salt = randomBytes(8).toString('hex');
+  const room = {
+    code, name: clean(name, 32) || code, owner, listed: listed !== false, created: Date.now(),
+    max: Math.min(MAX_ROOM, Math.max(2, Number(max) || MAX_ROOM)),
+    salt, pass: pw ? hashPw(salt, pw) : null, members: new Map(),
+  };
+  rooms.set(code, room);
+  return room;
 }
 function newId(room) {
   for (;;) {
     const id = '02' + '00' + randomBytes(4).toString('hex');   // locally administered, never broadcast
-    if (!room.has(id)) return id;
+    if (!room.members.has(id)) return id;
   }
 }
+const roomInfo = (r) => ({
+  code: r.code, name: r.name, host: r.owner, locked: !!r.pass, max: r.max, created: r.created,
+  racing: [...r.members.values()].some((c) => c.state === 'game'),
+  players: [...r.members.values()].map((c) => ({ name: c.name, rtt: c.rtt, state: c.state })),
+});
+
+// room browser updates: soon after any change, and every few seconds for the pings
+let listTimer = null;
+function roomsChanged() { if (!listTimer) listTimer = setTimeout(pushRooms, 300); }
+function pushRooms() {
+  listTimer = null;
+  if (!watchers.size) return;
+  const msg = JSON.stringify({ t: 'rooms', rooms: [...rooms.values()].filter((r) => r.listed).map(roomInfo) });
+  for (const c of watchers) c.sendText(msg);
+}
+setInterval(pushRooms, 4000).unref();
 
 class Client {
   constructor(sendText, sendBin, close, label) {
     this.sendText = sendText; this.sendBin = sendBin; this.close = close; this.label = label;
-    this.id = null; this.room = null; this.name = '';
+    this.id = null; this.room = null; this.name = ''; this.rtt = null; this.state = 'lobby';
   }
   json(o) { this.sendText(JSON.stringify(o)); }
+  fail(code, error) { this.json({ t: 'error', code, error }); }
+  enter(room, name) {
+    this.room = room; this.name = clean(name, 16) || 'Player'; this.id = newId(room); this.state = 'lobby';
+    const peers = [...room.members.values()].map((c) => ({ id: c.id, name: c.name, state: c.state }));
+    room.members.set(this.id, this);
+    if (!room.owner) room.owner = this.name;
+    this.json({ t: 'welcome', id: this.id, room: room.code, info: roomInfo(room), peers });
+    for (const c of room.members.values()) if (c !== this) c.json({ t: 'join', id: this.id, name: this.name });
+    console.log(`[relay] ${this.label} joined ${room.code} "${room.name}" as ${this.id} (${this.name}), ${room.members.size}/${room.max}`);
+    roomsChanged();
+  }
   onText(s) {
     let m; try { m = JSON.parse(s); } catch { return; }
-    if (m.t === 'hello' && !this.id) {
-      const roomName = String(m.room || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32);
-      if (!roomName) return this.json({ t: 'error', error: 'no room' });
-      const room = roomOf(roomName);
-      if (room.size >= MAX_ROOM) return this.json({ t: 'error', error: 'room full' });
-      this.room = roomName; this.name = String(m.name || 'player').slice(0, 24); this.id = newId(room);
-      const peers = [...room.values()].map((c) => ({ id: c.id, name: c.name }));
-      room.set(this.id, this);
-      this.json({ t: 'welcome', id: this.id, room: roomName, peers });
-      for (const c of room.values()) if (c !== this) c.json({ t: 'join', id: this.id, name: this.name });
-      console.log(`[relay] ${this.label} joined ${roomName} as ${this.id} (${this.name}), ${room.size} in room`);
+    if (m.t === 'list') {
+      watchers.add(this);
+      this.json({ t: 'rooms', rooms: [...rooms.values()].filter((r) => r.listed).map(roomInfo) });
+    } else if (m.t === 'create' && !this.id) {
+      const room = newRoom(newCode(), m.room || {}, clean(m.name, 16) || 'Player');
+      this.enter(room, m.name);
+    } else if (m.t === 'hello' && !this.id) {
+      const code = String(m.room || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32);
+      if (!code) return this.fail('noroom', 'No room given.');
+      let room = rooms.get(code);
+      if (!room) {
+        if (m.mustExist) return this.fail('gone', 'This room no longer exists.');
+        room = newRoom(code, { name: code, listed: false });     // native test builds: RT_ROOM=name
+      }
+      if (room.members.size >= room.max) return this.fail('full', 'This room is full.');
+      if (room.pass) {
+        const given = hashPw(room.salt, clean(m.password, 64));
+        if (!timingSafeEqual(given, room.pass)) return this.fail('password', m.password ? 'Wrong password.' : 'This room needs a password.');
+      }
+      this.enter(room, m.name);
+    } else if (m.t === 'leave') {
+      this.gone();
+    } else if (m.t === 'state' && this.id) {
+      this.state = m.state === 'game' ? 'game' : 'lobby';
+      for (const c of this.room.members.values()) if (c !== this) c.json({ t: 'state', id: this.id, state: this.state });
+      roomsChanged();
     } else if (m.t === 'signal' && this.id) {
-      const peer = rooms.get(this.room)?.get(m.to);
-      if (peer) peer.json({ t: 'signal', from: this.id, data: m.data });
+      this.room.members.get(m.to)?.json({ t: 'signal', from: this.id, data: m.data });
     } else if (m.t === 'info' && this.id) {
       const s = JSON.stringify({ t: 'info', from: this.id, data: m.data });
-      if (s.length < 2048) for (const c of rooms.get(this.room)?.values() ?? []) if (c !== this) c.sendText(s);
+      if (s.length < 2048) for (const c of this.room.members.values()) if (c !== this) c.sendText(s);
     } else if (m.t === 'ping') {
+      if (Number.isFinite(m.rtt)) this.rtt = Math.round(m.rtt);
       this.json({ t: 'pong', ts: m.ts });
     }
   }
   onBin(buf) {
     if (!this.id || buf.length < 7) return;
-    const room = rooms.get(this.room); if (!room) return;
     const dst = buf.subarray(0, 6).toString('hex');
     const out = Buffer.allocUnsafe(buf.length);
     Buffer.from(this.id, 'hex').copy(out, 0); buf.copy(out, 6, 6);
-    if (dst === BCAST) { for (const c of room.values()) if (c !== this) c.sendBin(out); }
-    else room.get(dst)?.sendBin(out);
+    if (dst === BCAST) { for (const c of this.room.members.values()) if (c !== this) c.sendBin(out); }
+    else this.room.members.get(dst)?.sendBin(out);
   }
   gone() {
     if (!this.id) return;
-    const room = rooms.get(this.room); if (!room) return;
-    room.delete(this.id);
-    for (const c of room.values()) c.json({ t: 'leave', id: this.id });
-    if (!room.size) rooms.delete(this.room);
-    console.log(`[relay] ${this.id} left ${this.room}`);
-    this.id = null;
+    const room = this.room;
+    room.members.delete(this.id);
+    for (const c of room.members.values()) c.json({ t: 'leave', id: this.id });
+    if (room.owner === this.name) room.owner = room.members.values().next().value?.name || '';
+    if (!room.members.size) rooms.delete(room.code);
+    console.log(`[relay] ${this.id} (${this.name}) left ${room.code}`);
+    this.id = null; this.room = null;
+    roomsChanged();
   }
+  closed() { watchers.delete(this); this.gone(); }
 }
 
 // ---------------------------------------------------------------- WebSocket
@@ -124,8 +189,8 @@ export function handleUpgrade(req, socket) {
       if (kind === 1) client.onText(msg.toString()); else client.onBin(msg);
     }
   });
-  socket.on('close', () => client.gone());
-  socket.on('error', () => client.gone());
+  socket.on('close', () => client.closed());
+  socket.on('error', () => client.closed());
 }
 
 // --------------------------------------------------- raw TCP (native builds)
@@ -148,11 +213,11 @@ export function listenRaw(port, host = '127.0.0.1') {
         if (kind === 0) client.onText(body.toString()); else client.onBin(Buffer.from(body));
       }
     });
-    sock.on('close', () => client.gone());
-    sock.on('error', () => client.gone());
+    sock.on('close', () => client.closed());
+    sock.on('error', () => client.closed());
   }).listen(...(isPath ? [port] : [port, host]), () => console.log(`[relay] native clients: ${isPath ? 'unix:' + port : `tcp://${host}:${port}`}`));
 }
 
 export function roomStats() {
-  return [...rooms.entries()].map(([name, r]) => ({ room: name, players: r.size }));
+  return [...rooms.values()].map(roomInfo);
 }

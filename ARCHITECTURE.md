@@ -102,7 +102,17 @@ is why clients lagged on 1999-era internet links. Packets are tagged `0xEA` +
   LAN. The 6-byte node address comes from the relay, broadcasts go to the whole
   room, and SAP (socket 0x452) handles game discovery. TCP/IP mode is refused.
 - `web/relay.mjs` (mounted at `/net` by `serve.mjs`): rooms, node ids, WebRTC
-  signalling and packet relay. There's also a raw TCP or Unix-socket endpoint
+  signalling and packet relay. Rooms are created explicitly from the page,
+  with a name, an optional password (salted SHA-256, kept in memory only),
+  2–8 players and listed or unlisted. A room disappears when its last member
+  leaves. Clients that send `{t:'list'}` get the room browser (members, their
+  server ping, and racing yes/no) on every change and every 4 s. Native test
+  builds still create unlisted rooms on the fly with `RT_ROOM`.
+- Lobby (page, before Start): your name, the room browser with an estimated
+  ping (your round trip to the server plus the members' average), create and
+  join forms, and the room page with the members, their direct/relay status
+  and the best host. Players join the room before Start, so the WebRTC links
+  are already up when the game opens its sockets. There's also a raw TCP or Unix-socket endpoint
   for native test builds (`--relay-tcp PORT|PATH`, `RT_NET=unix:PATH`).
 - `web/net.js`: browsers open WebRTC data channels to every room member and
   fall back to the relay. The channels are UDP-like (unordered, no

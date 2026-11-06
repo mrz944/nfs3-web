@@ -27,11 +27,40 @@
   #hint { position: fixed; left: 12px; bottom: 8px; color: #fff8; font-size: 12px; pointer-events: none; }
   input[type=file] { display: none; }
   #online { margin-top: 20px; padding-top: 16px; border-top: 1px solid #2a3040; }
-  #online h2 { font-size: 16px; margin: 0 0 4px; }
-  #online input { background: #0b0d12; color: var(--text); border: 1px solid #2a3040; border-radius: 6px; padding: 8px; font: inherit; width: 100%; max-width: 260px; }
+  .online-head, .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #online h2 { font-size: 16px; margin: 0; }
+  #online h3 { font-size: 14px; margin: 0; }
+  #online section { margin-top: 14px; }
+  .pill { font-size: 12px; color: var(--muted); border: 1px solid #2a3040; border-radius: 999px; padding: 2px 10px; }
+  .pill.ok { color: #7ddc9b; border-color: #2d5a3c; }
+  .pill.bad { color: var(--err); border-color: #5a2d2d; }
+  .namebox { margin-top: 10px; }
+  #online input, #online select { background: #0b0d12; color: var(--text); border: 1px solid #2a3040; border-radius: 6px; padding: 7px 8px; font: inherit; width: 100%; }
+  #online label { display: block; color: var(--muted); font-size: 13px; }
+  #online .check { display: flex; align-items: center; gap: 8px; align-self: end; padding-bottom: 8px; }
+  #online .check input { width: auto; }
+  .namebox input { max-width: 260px; display: block; margin-top: 4px; }
+  button.small { margin-top: 0; padding: 6px 12px; font-size: 14px; }
+  .card { background: #0f1219; border: 1px solid #2a3040; border-radius: 10px; padding: 12px; margin-top: 10px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .msg { color: var(--err); font-size: 14px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .tablewrap { overflow-x: auto; margin-top: 8px; }
+  #rooms { width: 100%; border-collapse: collapse; font-size: 14px; }
+  #rooms th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid #2a3040; }
+  #rooms td { padding: 8px; border-bottom: 1px solid #1f2430; vertical-align: middle; }
+  #rooms td:last-child { text-align: right; }
+  #rooms .rname { font-weight: 600; }
+  #rooms .sub { color: var(--muted); font-size: 12px; }
+  .tag { display: inline-block; font-size: 11px; border-radius: 4px; padding: 0 5px; margin-left: 6px; background: #2a3040; color: var(--muted); }
+  .tag.race { background: #3a2a10; color: #f0b45a; }
+  .ping-good { color: #7ddc9b; } .ping-ok { color: #e6c86e; } .ping-bad { color: var(--err); }
+  #members { list-style: none; padding: 0; margin: 10px 0; }
+  #members li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; background: #0f1219; border-radius: 6px; margin-bottom: 4px; font-size: 14px; }
   #share { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-  #share code { background: #0b0d12; border-radius: 6px; padding: 8px; word-break: break-all; flex: 1 1 240px; color: var(--accent); }
-  #share button { margin-top: 0; }
+  #share code { background: #0b0d12; border-radius: 6px; padding: 7px 8px; word-break: break-all; flex: 1 1 240px; color: var(--accent); font-size: 13px; }
   .howto { font-size: 13px; }
   #netbadge { position: fixed; left: 10px; top: 8px; z-index: 4; background: #000a; color: #fffc; border-radius: 8px; padding: 6px 10px;
     font: 12px/1.4 system-ui, sans-serif; cursor: pointer; max-width: 70vw; }
@@ -55,18 +84,55 @@
       <button id="forget" class="secondary" hidden>Remove stored game files</button>
     </div>
     <div id="online">
-      <h2>Online play</h2>
-      <p id="online-status">Race friends in their browsers. Create a room and send them the link.</p>
-      <label for="pname">Your name</label><br>
-      <input id="pname" maxlength="16" autocomplete="nickname">
-      <div>
-        <button id="create-room" class="secondary">Create online room</button>
-        <button id="leave-room" class="secondary" hidden>Leave room</button>
+      <div class="online-head">
+        <h2>Online play</h2>
+        <span id="server-state" class="pill">connecting…</span>
       </div>
-      <div id="share" hidden><code id="share-link"></code><button id="copy-link" class="secondary">Copy link</button></div>
-      <p class="howto" id="howto" hidden>After Start: <b>Connect Players → Network IPX</b>. One player picks
-        <b>Create Game</b>, everyone else picks the game under <b>Games Available</b> and <b>Join Game</b>.
-        For two players, <b>Peer-to-Peer</b> gives both the same responsiveness.</p>
+      <div class="namebox">
+        <label for="pname">Your name</label>
+        <input id="pname" maxlength="16" autocomplete="nickname" placeholder="Player">
+      </div>
+      <p id="lobby-msg" class="msg" hidden></p>
+
+      <section id="lobby">
+        <div class="bar">
+          <h3>Rooms</h3>
+          <button id="show-create" class="small">Create room</button>
+        </div>
+        <form id="create-form" class="card" hidden autocomplete="off">
+          <div class="grid">
+            <label>Room name <input id="c-name" maxlength="32" placeholder="My room"></label>
+            <label>Password <input id="c-pass" type="password" maxlength="64" placeholder="none"></label>
+            <label>Players <select id="c-max"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option selected>8</option></select></label>
+            <label class="check"><input id="c-listed" type="checkbox" checked> Show in the room list</label>
+          </div>
+          <div class="actions"><button type="submit" class="small">Create</button><button type="button" id="c-cancel" class="small secondary">Cancel</button></div>
+        </form>
+        <form id="pass-form" class="card" hidden autocomplete="off">
+          <label><span id="pass-label">Password</span> <input id="j-pass" type="password" maxlength="64"></label>
+          <div class="actions"><button type="submit" class="small">Join</button><button type="button" id="j-cancel" class="small secondary">Cancel</button></div>
+        </form>
+        <div class="tablewrap">
+          <table id="rooms">
+            <thead><tr><th>Room</th><th>Players</th><th title="Estimated round trip through the server; a direct connection is usually faster">Ping</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="rooms-empty" class="muted">No open rooms yet. Create one and invite your friends.</p>
+      </section>
+
+      <section id="inroom" hidden>
+        <div class="bar">
+          <h3 id="room-title"></h3>
+          <button id="leave-room" class="small secondary">Leave room</button>
+        </div>
+        <ul id="members"></ul>
+        <p id="best-host" class="muted"></p>
+        <div id="share"><code id="share-link"></code><button id="copy-link" class="small secondary">Copy invite link</button></div>
+        <p class="howto">Everyone clicks <b>Start</b>. In the game: <b>Connect Players → Network IPX</b>. One player
+          (ideally the best host) picks <b>Create Game</b>; the others choose the game under <b>Games Available</b>
+          and click <b>Join Game</b>. For two players, <b>Peer-to-Peer</b> gives both players the same responsiveness.</p>
+      </section>
     </div>
     <div id="log"></div>
   </section>

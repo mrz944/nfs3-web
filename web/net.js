@@ -58,48 +58,89 @@ export function unframe(rx, m) {
 export class Net extends EventTarget {
   constructor() {
     super();
-    this.ws = null; this.id = null; this.room = null;
-    this.peers = new Map();      // id -> { name, pc, dc, rtt, direct }
+    this.ws = null; this.id = null; this.room = null; this.info = null;
+    this.peers = new Map();      // id -> { name, state, pc, dc, rtt, direct, tx, rx }
     this.mod = null; this.queue = [];
     this.relayRtt = null;
     this.pingTable = new Map();  // id -> { peerId: ms } as reported by each member
+    this.rooms = [];             // room browser
+    this.waiting = null;         // pending create/join: { resolve, reject }
   }
 
-  // ------------------------------------------------------------- lobby
-  join(room, name) {
-    return new Promise((resolve, reject) => {
-      const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/net`;
-      const ws = new WebSocket(url);
+  // ------------------------------------------------------------- server
+  // one WebSocket for the room browser and for the room we're in
+  connect() {
+    if (this.ws && this.ws.readyState <= 1) return this.connecting;
+    this.connecting = new Promise((resolve, reject) => {
+      const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/net`);
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
-      const timer = setTimeout(() => reject(new Error('The online server did not answer.')), 8000);
+      const timer = setTimeout(() => { reject(new Error('The online server did not answer.')); ws.close(); }, 8000);
+      ws.onopen = () => {
+        clearTimeout(timer);
+        this.send({ t: 'list' });
+        clearInterval(this.pingTimer);
+        this.pingTimer = setInterval(() => this.send({ t: 'ping', ts: performance.now(), rtt: this.relayRtt ?? undefined }), 2000);
+        this.send({ t: 'ping', ts: performance.now() });
+        resolve();
+      };
       ws.onerror = () => { clearTimeout(timer); reject(new Error('Could not reach the online server.')); };
-      ws.onclose = () => { this.emit('status'); if (this.id) this.emit('log', 'disconnected from the online server'); };
+      ws.onclose = () => {
+        clearInterval(this.pingTimer);
+        if (this.id) this.emit('log', 'disconnected from the online server');
+        this.dropRoom();
+        this.waiting?.reject(new Error('Disconnected from the online server.')); this.waiting = null;
+        this.emit('disconnected');
+      };
       ws.onmessage = (ev) => {
         if (typeof ev.data !== 'string') { this.fromRelay(new Uint8Array(ev.data)); return; }
-        const m = JSON.parse(ev.data);
-        if (m.t === 'welcome') {
-          clearTimeout(timer);
-          this.id = m.id; this.room = m.room;
-          for (const p of m.peers) this.addPeer(p.id, p.name, true);   // we are the newcomer: we call them
-          this.emit('status'); resolve(m);
-          this.pingTimer = setInterval(() => this.send({ t: 'ping', ts: performance.now() }), 2000);
-        } else if (m.t === 'error') { clearTimeout(timer); reject(new Error(m.error)); }
-        else if (m.t === 'join') { this.addPeer(m.id, m.name, false); this.emit('log', `${m.name} joined the room`); this.emit('status'); }
-        else if (m.t === 'leave') { const p = this.peers.get(m.id); if (p) { p.pc?.close(); clearInterval(p.statsTimer); this.peers.delete(m.id); this.pingTable.delete(m.id); this.emit('log', `${p.name} left`); this.emit('status'); } }
-        else if (m.t === 'signal') this.onSignal(m.from, m.data);
-        else if (m.t === 'pong') { this.relayRtt = performance.now() - m.ts; this.shareRtts(); this.emit('status'); }
-        else if (m.t === 'info' && m.data?.rtt) { this.pingTable.set(m.from, m.data.rtt); this.emit('status'); }
+        this.onMessage(JSON.parse(ev.data));
       };
-      ws.onopen = () => this.send({ t: 'hello', room, name });
     });
+    return this.connecting;
+  }
+  onMessage(m) {
+    if (m.t === 'rooms') { this.rooms = m.rooms; this.emit('rooms', m.rooms); }
+    else if (m.t === 'welcome') {
+      this.id = m.id; this.room = m.room; this.info = m.info;
+      for (const p of m.peers) this.addPeer(p.id, p.name, true, p.state);   // we are the newcomer: we call them
+      this.emit('status');
+      this.waiting?.resolve(m); this.waiting = null;
+    } else if (m.t === 'error') { const e = new Error(m.error); e.code = m.code; this.waiting?.reject(e); this.waiting = null; }
+    else if (m.t === 'join') { this.addPeer(m.id, m.name, false); this.emit('log', `${m.name} joined the room`); this.emit('status'); }
+    else if (m.t === 'leave') { const p = this.peers.get(m.id); if (p) { this.closePeer(m.id); this.emit('log', `${p.name} left`); this.emit('status'); } }
+    else if (m.t === 'state') { const p = this.peers.get(m.id); if (p) { p.state = m.state; this.emit('status'); } }
+    else if (m.t === 'signal') this.onSignal(m.from, m.data);
+    else if (m.t === 'pong') { this.relayRtt = performance.now() - m.ts; if (this.id) this.shareRtts(); this.emit('status'); }
+    else if (m.t === 'info' && m.data?.rtt) { this.pingTable.set(m.from, m.data.rtt); this.emit('status'); }
+  }
+  request(msg) {
+    if (this.id) return Promise.reject(new Error('Already in a room.'));
+    return this.connect().then(() => new Promise((resolve, reject) => {
+      this.waiting = { resolve, reject };
+      this.send(msg);
+      setTimeout(() => { if (this.waiting?.resolve === resolve) { this.waiting = null; reject(new Error('The online server did not answer.')); } }, 8000);
+    }));
+  }
+  create(room, name) { return this.request({ t: 'create', room, name }); }
+  join(code, name, password) { return this.request({ t: 'hello', room: code, name, password, mustExist: true }); }
+  leave() { this.send({ t: 'leave' }); this.dropRoom(); this.emit('status'); }
+  setState(state) { this.state = state; this.send({ t: 'state', state }); }
+  dropRoom() {
+    for (const id of [...this.peers.keys()]) this.closePeer(id);
+    this.id = null; this.room = null; this.info = null; this.pingTable.clear(); this.queue = [];
+  }
+  closePeer(id) {
+    const p = this.peers.get(id); if (!p) return;
+    clearInterval(p.statsTimer); try { p.pc.close(); } catch {}
+    this.peers.delete(id); this.pingTable.delete(id);
   }
   send(o) { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(o)); }
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
 
   // ------------------------------------------------------------ WebRTC
-  addPeer(id, name, initiator) {
-    const p = { name, pc: new RTCPeerConnection({ iceServers: ICE }), dc: null, rtt: null, direct: false,
+  addPeer(id, name, initiator, state = 'lobby') {
+    const p = { name, state, pc: new RTCPeerConnection({ iceServers: ICE }), dc: null, rtt: null, direct: false,
                 tx: { seq: 0, hist: [] }, rx: { hi: null, seen: new Set(), gaps: 0, recovered: 0 } };
     this.peers.set(id, p);
     p.pc.onicecandidate = (e) => { if (e.candidate) this.send({ t: 'signal', to: id, data: { ice: e.candidate } }); };
@@ -157,7 +198,7 @@ export class Net extends EventTarget {
   fromRelay(f) { if (f.length > 6) this.deliver(hex(f.subarray(0, 6)), f.subarray(6)); }
   deliver(srcId, pkt) {
     const mod = this.mod;
-    if (!mod) { this.queue.push([srcId, pkt]); return; }
+    if (!mod) { if (this.queue.length < 256) this.queue.push([srcId, pkt]); return; }
     const n = 6 + pkt.length, p = mod._malloc(n);
     mod.HEAPU8.set(unhex(srcId), p); mod.HEAPU8.set(pkt, p + 6);
     mod._rt_net_packet(p, n);
@@ -195,11 +236,7 @@ export class Net extends EventTarget {
       const r = this.rttTo(p), loss = p.rx.hi ? Math.round(100 * Math.max(0, p.rx.gaps - p.rx.recovered) / p.rx.hi) : 0;
       return `${p.name}: ${r != null ? Math.round(r) + ' ms ' : ''}${p.direct ? 'direct' : 'relay'}${loss ? ` ${loss}% lost` : ''}`;
     });
-    return { room: this.room, players: this.peers.size + 1, peers: list, best: this.bestHost() };
+    return { room: this.room, name: this.info?.name, players: this.peers.size + 1, peers: list, best: this.bestHost() };
   }
 }
 
-export function newRoomCode() {
-  const a = 'abcdefghjkmnpqrstuvwxyz23456789';
-  return Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => a[b % a.length]).join('');
-}
