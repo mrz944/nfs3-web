@@ -63,6 +63,9 @@ export class Net extends EventTarget {
     this.mod = null; this.queue = [];
     this.relayRtt = null;
     this.pingTable = new Map();  // id -> { peerId: ms } as reported by each member
+    this.fpsTable = new Map();   // id -> frame rate each member's game last ran at
+    // last game's frame rate in this browser, so the lobby can weigh it before anyone starts
+    try { this.myFps = Number(localStorage.getItem('nfs3.lastFps')) || 0; } catch { this.myFps = 0; }
     this.rooms = [];             // room browser
     this.waiting = null;         // pending create/join: { resolve, reject }
   }
@@ -112,7 +115,7 @@ export class Net extends EventTarget {
     else if (m.t === 'state') { const p = this.peers.get(m.id); if (p) { p.state = m.state; this.emit('status'); } }
     else if (m.t === 'signal') this.onSignal(m.from, m.data);
     else if (m.t === 'pong') { this.relayRtt = performance.now() - m.ts; if (this.id) this.shareRtts(); this.emit('status'); }
-    else if (m.t === 'info' && m.data?.rtt) { this.pingTable.set(m.from, m.data.rtt); this.emit('status'); }
+    else if (m.t === 'info' && m.data?.rtt) { this.pingTable.set(m.from, m.data.rtt); if (m.data.fps) this.fpsTable.set(m.from, m.data.fps); this.emit('status'); }
   }
   request(msg) {
     if (this.id) return Promise.reject(new Error('Already in a room.'));
@@ -221,10 +224,17 @@ export class Net extends EventTarget {
     const rtt = {};
     for (const [id, p] of this.peers) { const r = this.rttTo(p); if (r != null) rtt[id] = Math.round(r); }
     this.pingTable.set(this.id, rtt);
-    if (this.peers.size) this.send({ t: 'info', data: { rtt } });
+    if (this.myFps) this.fpsTable.set(this.id, this.myFps);
+    if (this.peers.size) this.send({ t: 'info', data: { rtt, fps: this.myFps || undefined } });
   }
   // The host's input counts at once, a client's after one round trip to the host,
   // so the best host is the member whose worst round trip to anyone is smallest.
+  // The host also paces the race for everyone, so a host that can't hold 60 fps costs
+  // each player its extra frame time (several times over: it delays every tick).
+  hostCost(id) {
+    const fps = this.fpsTable.get(id);
+    return fps ? Math.max(0, 1000 / fps - 1000 / 60) * 4 : 0;
+  }
   bestHost() {
     if (!this.peers.size) return null;
     const ids = [this.id, ...this.peers.keys()];
@@ -236,6 +246,7 @@ export class Net extends EventTarget {
         if (r == null) { worst = Infinity; break; }
         worst = Math.max(worst, r);
       }
+      if (worst < Infinity) worst += this.hostCost(a);
       if (worst < Infinity && (!best || worst < best.worst)) best = { id: a, worst };
     }
     if (!best) return null;

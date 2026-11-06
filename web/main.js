@@ -449,7 +449,7 @@ function setupOnline() {
     }
     if (!net.peers.size) ul.append(el('li', {}, el('span', { className: 'muted', textContent: 'Waiting for friends… send them the invite link.' })));
     const best = net.bestHost();
-    $('best-host').textContent = best ? `Best host: ${best.me ? 'you' : best.name} (worst ping to anyone ${best.worst} ms). The host has no input lag; everyone else has one round trip to the host.` : '';
+    $('best-host').textContent = best ? `Best host: ${best.me ? 'you' : best.name} (slowest link ${best.worst} ms, counting ping and frame rate). The host has no input lag; everyone else has one round trip to the host.` : '';
     $('share-link').textContent = roomLink(net.room);
   }
   const redraw = () => { drawRooms(); drawRoom(); };
