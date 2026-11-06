@@ -89,7 +89,19 @@ void gpu_publish(GFrame *f) {
         dl.tv_nsec += 25 * 1000000; if (dl.tv_nsec >= 1000000000) { dl.tv_sec++; dl.tv_nsec -= 1000000000; }
         while (pending && pthread_cond_timedwait(&fq_cv, &fq_mu, &dl) == 0) {}
     }
+#ifdef __EMSCRIPTEN__
+    /* nobody is drawing (hidden tab/window: the browser stops animation frames):
+     * don't let the game spin out hundreds of thousands of frames per second */
+    if (now_s() - renderer_seen >= 0.5) {
+        static double last_pub;
+        double wait = last_pub + 1.0 / 60 - now_s();
+        if (wait > 0) { pthread_mutex_unlock(&fq_mu); struct timespec ts = { 0, (long)(wait * 1e9) }; nanosleep(&ts, NULL); pthread_mutex_lock(&fq_mu); }
+        last_pub = now_s();
+    }
+#endif
     GFrame *old = NULL;
+    /* merged incremental frames must not grow without bound while nobody takes them */
+    if (pending && (pending->nverts > 300000 || pending->ncmds > 20000 || pending->nlfbs > 8)) { old = pending; pending = NULL; gpu_frame_free(old); old = NULL; }
     if (pending && !frame_is_full(f)) {
         /* incremental frame (draws over the previous picture, e.g. a loading bar):
          * append it to the frame still waiting so nothing it builds on is lost */

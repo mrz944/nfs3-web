@@ -13,6 +13,7 @@
 //   <- {t:'join', id, name} / {t:'leave', id}
 //   -> {t:'signal', to, data}             <- {t:'signal', from, data}      (WebRTC)
 //   -> {t:'ping', ts}                     <- {t:'pong', ts}
+//   -> {t:'info', data}                   <- {t:'info', from, data}        (to everyone: ping tables)
 //   -> binary [dst node 6][payload]       <- binary [src node 6][payload]  (dst ff.. = everyone)
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer as createTcpServer } from 'node:net';
@@ -55,6 +56,9 @@ class Client {
     } else if (m.t === 'signal' && this.id) {
       const peer = rooms.get(this.room)?.get(m.to);
       if (peer) peer.json({ t: 'signal', from: this.id, data: m.data });
+    } else if (m.t === 'info' && this.id) {
+      const s = JSON.stringify({ t: 'info', from: this.id, data: m.data });
+      if (s.length < 2048) for (const c of rooms.get(this.room)?.values() ?? []) if (c !== this) c.sendText(s);
     } else if (m.t === 'ping') {
       this.json({ t: 'pong', ts: m.ts });
     }

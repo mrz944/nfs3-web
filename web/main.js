@@ -15,7 +15,21 @@ function log(...a) {
   const line = `${((performance.now() - t0) / 1000).toFixed(1).padStart(6)}  ${a.join(' ')}\n`;
   el.textContent = (el.textContent + line).slice(-20000);
   el.scrollTop = el.scrollHeight;
+  logQueue.push(line);
+  if (/ERROR|ABORT|stall/.test(line)) flushLog();
 }
+// every log line also goes to the server (build/clientlogs/<session>.log), so problems
+// on a player's machine can be looked at afterwards
+const logSession = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '') + '-' + Math.random().toString(36).slice(2, 8);
+const logQueue = [`session ${logSession} ${navigator.userAgent} cores=${navigator.hardwareConcurrency} ${location.href}\n`];
+function flushLog(beacon = false) {
+  if (!logQueue.length) return;
+  const body = logQueue.join(''); logQueue.length = 0;
+  const url = `__log?s=${logSession}`;
+  try { if (beacon) navigator.sendBeacon(url, body); else fetch(url, { method: 'POST', body, keepalive: body.length < 60000 }).catch(() => {}); } catch {}
+}
+setInterval(flushLog, 3000);
+window.addEventListener('pagehide', () => flushLog(true));
 for (const k of ['log', 'warn', 'error']) { const orig = console[k].bind(console); console[k] = (...a) => { orig(...a); log(...a.map(String)); }; }
 window.addEventListener('error', (e) => log('ERROR', e.message, e.filename ? `${e.filename}:${e.lineno}` : ''));
 window.addEventListener('unhandledrejection', (e) => log('ERROR (promise)', e.reason?.stack || e.reason));
@@ -187,6 +201,15 @@ async function startAudio(mod) {
   return ctx;
 }
 
+// the game ended (crash or exit): say so over the game instead of leaving a frozen picture
+let gameDead = false;
+function gameStopped(msg) {
+  gameDead = true;
+  status(msg, true);
+  const el = $('log'); el.hidden = false; el.classList.add('overlay');
+  log(msg); flushLog();
+}
+
 // -------------------------------------------------------------------- boot
 async function start() {
   $('start').disabled = true;
@@ -205,7 +228,9 @@ async function start() {
   const mod = await NFS3({
     setStatus: (t) => t && log('[emscripten]', t),
     monitorRunDependencies: (n) => log('[emscripten] pending dependencies:', n),
-    onAbort: (what) => { log('ABORT', what); status('The game stopped: ' + what, true); },
+    onAbort: (what) => { log('ABORT', what); gameStopped('The game stopped: ' + what); },
+    onGameMessage: (t) => log('ERROR game message:', t),
+    onGameExit: (code) => { log('ERROR game exited, code', code); gameStopped('The game closed itself (see the log). Reload the page to start again.'); },
     arguments: ['/opfs/nfs3'],
     print: (t) => console.log(t),
     printErr: (t) => console.log(t),
@@ -222,17 +247,24 @@ async function start() {
   attachInput(mod, canvas);
   startAudio(mod).catch((e) => console.warn('audio unavailable:', e));
 
-  let fpsN = 0, fpsT = performance.now(), first = true;
+  let fpsN = 0, fpsT = performance.now(), first = true, stalled = false, lastFresh = performance.now();
   $('fps').hidden = false;
   function frame() {
+    if (gameDead) return;
     fitCanvas(canvas);
     const fresh = mod._rt_gpu_frame(canvas.width, canvas.height);
     if (fresh < 0) { status('WebGL2 is not available in this browser.', true); return; }
     if (fresh) {
+      if (stalled) log(`stall over after ${((performance.now() - lastFresh) / 1000).toFixed(1)} s`);
+      stalled = false; lastFresh = performance.now();
       fpsN++;
       if (first) { first = false; log('first frame'); if (!keepLog) setTimeout(() => { $('log').hidden = true; }, 4000); }
     }
     const now = performance.now();
+    if (first && !stalled && now - lastFresh > 30000) { stalled = true; log('stall: no first frame 30 s after start'); }
+    if (!first && !stalled && now - lastFresh > 5000 && document.visibilityState === 'visible') {
+      stalled = true; log('stall: no new frame from the game for 5 s');
+    }
     if (now - fpsT >= 1000) { $('fps').textContent = `${Math.round(fpsN * 1000 / (now - fpsT))} fps`; fpsN = 0; fpsT = now; }
     requestAnimationFrame(frame);
   }
@@ -243,7 +275,8 @@ function showNetBadge() {
   const b = $('netbadge');
   const draw = () => {
     const s = net.summary();
-    b.textContent = `Room ${s.room} · ${s.players} player${s.players === 1 ? '' : 's'}` + (s.peers.length ? ' · ' + s.peers.join(' · ') : ' · waiting for friends');
+    b.textContent = `Room ${s.room} · ${s.players} player${s.players === 1 ? '' : 's'}` + (s.peers.length ? ' · ' + s.peers.join(' · ') : ' · waiting for friends')
+      + (s.best ? ` · best host: ${s.best.name}${s.best.me ? ' (create the game)' : ''}` : '');
   };
   b.hidden = false; draw();
   net.addEventListener('status', draw);

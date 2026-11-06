@@ -1,6 +1,9 @@
 /* USER32 / GDI32 / ADVAPI32 / OLE32 / SHELL32 / WINMM / DINPUT. */
 #define _GNU_SOURCE
 #include "rt.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <ctype.h>
 #include <pthread.h>
 #include <time.h>
@@ -120,8 +123,14 @@ static uint32_t u_GetAsyncKeyState(CPU *c, const uint32_t *a) { return g_keys[A(
 static uint32_t u_GetKeyState(CPU *c, const uint32_t *a) { return g_keys[A(0) & 0xFF] ? 0xFF80u : 0; }
 static uint32_t u_GetKeyboardType(CPU *c, const uint32_t *a) { return A(0) == 0 ? 4 : A(0) == 2 ? 12 : 0; }
 static uint32_t u_MessageBoxA(CPU *c, const uint32_t *a) {
-    rt_log("MessageBoxA: [%s] %s", A(2) ? HSTR(A(2)) : "", A(1) ? HSTR(A(1)) : "");
+    const char *cap = A(2) ? HSTR(A(2)) : "", *txt = A(1) ? HSTR(A(1)) : "";
+    fprintf(stderr, "[rt] MessageBoxA: [%s] %s\n", cap, txt);   /* always: usually the game's last words */
     guest_backtrace(c);
+#ifdef __EMSCRIPTEN__
+    char *m = malloc(strlen(cap) + strlen(txt) + 4);
+    sprintf(m, "%s %s", cap, txt);
+    MAIN_THREAD_ASYNC_EM_ASM({ const t = UTF8ToString($0); _free($0); if (Module.onGameMessage) Module.onGameMessage(t); }, m);
+#endif
     return 1; /* IDOK */
 }
 static uint32_t u_CharUpperA(CPU *c, const uint32_t *a) {

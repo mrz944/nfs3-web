@@ -104,8 +104,21 @@ is why clients lagged on 1999-era internet links. Packets are tagged `0xEA` +
 - `web/relay.mjs` (mounted at `/net` by `serve.mjs`): rooms, node ids, WebRTC
   signalling and packet relay. There's also a raw TCP or Unix-socket endpoint
   for native test builds (`--relay-tcp PORT|PATH`, `RT_NET=unix:PATH`).
-- `web/net.js`: browsers open WebRTC data channels to every room member
-  (unordered, `maxPacketLifeTime` 150 ms) and fall back to the relay.
+- `web/net.js`: browsers open WebRTC data channels to every room member and
+  fall back to the relay. The channels are UDP-like (unordered, no
+  retransmits). Each message repeats the previous two packets, so a lost
+  packet arrives with the next one (~31 ms) instead of after a resend round
+  trip. Members share their ping tables, and the badge names the **best host**:
+  the player whose worst round trip to anyone is smallest. Hosting matters
+  because the host's input counts at once and a client's after one round trip
+  to the host.
+- Measured natively with `RT_NET_LOSS=10` (drop 10% of incoming packets): the
+  game's own protocol already resends a lost packet about one tick later, and
+  neither side's send rhythm ever paused for more than 33 ms. The remaining
+  client lag is the round trip itself, which is inherent to lockstep. Removing
+  it needs prediction plus rollback (GGPO style: snapshot the guest state, run
+  ahead on predicted inputs, rewind and re-simulate on a misprediction). That
+  isn't done.
 - Runtime fixes that online play needed: `GetSystemMetrics(SM_NETWORK)` must
   be 1 (otherwise every network option is greyed out); `closesocket` must wake
   threads blocked in `recvfrom`/`select`; `WaitForMultipleObjects(bWaitAll)`

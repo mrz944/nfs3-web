@@ -3,14 +3,57 @@
 // game's IPX packets (runtime/net.c) between them. Packets go peer-to-peer when
 // the direct channel is open and through the relay otherwise.
 //
-// Wire format between pages (data channel): the game packet as is (the sender
-// is known from the channel). Through the relay: [dst node 6][packet] out,
-// [src node 6][packet] in.
+// Wire format through the relay: [dst node 6][packet] out, [src node 6][packet] in.
+// Data channels are unreliable (no retransmits); instead every message also
+// repeats the previous packets (see frame()), so a lost one is recovered from
+// the next message ~31 ms later, however long the round trip is.
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }];
 const BCAST = 'ffffffffffff';
 const hex = (u8) => [...u8].map((b) => b.toString(16).padStart(2, '0')).join('');
 const unhex = (s) => Uint8Array.from(s.match(/../g), (h) => parseInt(h, 16));
+
+// ---- redundant framing: [u32 seq of newest][n][ (u16 len, bytes) newest first ... ]
+const REDUNDANT = 3, REDUNDANT_BYTES = 1000, REDUNDANT_AGE_MS = 250;
+export function frame(tx, pkt) {             // tx = { seq, hist: [{seq, pkt, t}] }
+  const now = performance.now();
+  tx.seq = (tx.seq + 1) >>> 0;
+  tx.hist.unshift({ seq: tx.seq, pkt, t: now });
+  if (tx.hist.length > REDUNDANT) tx.hist.length = REDUNDANT;
+  const parts = [];
+  let size = 5;
+  for (const h of tx.hist) {
+    if (parts.length && (size + 2 + h.pkt.length > REDUNDANT_BYTES || now - h.t > REDUNDANT_AGE_MS || h.seq !== (tx.seq - parts.length) >>> 0)) break;
+    parts.push(h.pkt); size += 2 + h.pkt.length;
+  }
+  const out = new Uint8Array(size), dv = new DataView(out.buffer);
+  dv.setUint32(0, tx.seq, true); out[4] = parts.length;
+  let o = 5;
+  for (const q of parts) { dv.setUint16(o, q.length, true); out.set(q, o + 2); o += 2 + q.length; }
+  return out;
+}
+// returns the packets not seen before, oldest first; rx = { hi, seen: Set }
+export function unframe(rx, m) {
+  if (m.length < 5) return [];
+  const dv = new DataView(m.buffer, m.byteOffset, m.byteLength);
+  const seq = dv.getUint32(0, true), n = m[4], got = [];
+  let o = 5;
+  for (let i = 0; i < n && o + 2 <= m.length; i++) {
+    const len = dv.getUint16(o, true); if (o + 2 + len > m.length) break;
+    got.push([(seq - i) >>> 0, m.slice(o + 2, o + 2 + len)]); o += 2 + len;
+  }
+  const out = [];
+  for (const [s, p] of got.reverse()) {
+    if (rx.seen.has(s) || (rx.hi != null && s + 512 < rx.hi)) continue;
+    rx.seen.add(s); out.push(p);
+    if (rx.hi == null || s > rx.hi) {
+      if (rx.hi != null && s > rx.hi + 1) rx.gaps += s - rx.hi - 1;   // missing before this one (may be recovered)
+      rx.hi = s;
+    } else rx.recovered++;
+  }
+  if (rx.seen.size > 1024) for (const s of rx.seen) { if (s + 512 < rx.hi) rx.seen.delete(s); }
+  return out;
+}
 
 export class Net extends EventTarget {
   constructor() {
@@ -19,6 +62,7 @@ export class Net extends EventTarget {
     this.peers = new Map();      // id -> { name, pc, dc, rtt, direct }
     this.mod = null; this.queue = [];
     this.relayRtt = null;
+    this.pingTable = new Map();  // id -> { peerId: ms } as reported by each member
   }
 
   // ------------------------------------------------------------- lobby
@@ -42,9 +86,10 @@ export class Net extends EventTarget {
           this.pingTimer = setInterval(() => this.send({ t: 'ping', ts: performance.now() }), 2000);
         } else if (m.t === 'error') { clearTimeout(timer); reject(new Error(m.error)); }
         else if (m.t === 'join') { this.addPeer(m.id, m.name, false); this.emit('log', `${m.name} joined the room`); this.emit('status'); }
-        else if (m.t === 'leave') { const p = this.peers.get(m.id); if (p) { p.pc?.close(); this.peers.delete(m.id); this.emit('log', `${p.name} left`); this.emit('status'); } }
+        else if (m.t === 'leave') { const p = this.peers.get(m.id); if (p) { p.pc?.close(); clearInterval(p.statsTimer); this.peers.delete(m.id); this.pingTable.delete(m.id); this.emit('log', `${p.name} left`); this.emit('status'); } }
         else if (m.t === 'signal') this.onSignal(m.from, m.data);
-        else if (m.t === 'pong') { this.relayRtt = performance.now() - m.ts; this.emit('status'); }
+        else if (m.t === 'pong') { this.relayRtt = performance.now() - m.ts; this.shareRtts(); this.emit('status'); }
+        else if (m.t === 'info' && m.data?.rtt) { this.pingTable.set(m.from, m.data.rtt); this.emit('status'); }
       };
       ws.onopen = () => this.send({ t: 'hello', room, name });
     });
@@ -54,7 +99,8 @@ export class Net extends EventTarget {
 
   // ------------------------------------------------------------ WebRTC
   addPeer(id, name, initiator) {
-    const p = { name, pc: new RTCPeerConnection({ iceServers: ICE }), dc: null, rtt: null, direct: false };
+    const p = { name, pc: new RTCPeerConnection({ iceServers: ICE }), dc: null, rtt: null, direct: false,
+                tx: { seq: 0, hist: [] }, rx: { hi: null, seen: new Set(), gaps: 0, recovered: 0 } };
     this.peers.set(id, p);
     p.pc.onicecandidate = (e) => { if (e.candidate) this.send({ t: 'signal', to: id, data: { ice: e.candidate } }); };
     p.pc.onconnectionstatechange = () => { if (p.pc.connectionState === 'failed') this.emit('log', `no direct connection to ${name}, using the relay`); this.emit('status'); };
@@ -62,11 +108,11 @@ export class Net extends EventTarget {
       p.dc = dc; dc.binaryType = 'arraybuffer';
       dc.onopen = () => { p.direct = true; this.emit('log', `direct connection to ${name}`); this.emit('status'); };
       dc.onclose = () => { p.direct = false; this.emit('status'); };
-      dc.onmessage = (ev) => this.deliver(id, new Uint8Array(ev.data));
+      dc.onmessage = (ev) => { for (const pkt of unframe(p.rx, new Uint8Array(ev.data))) this.deliver(id, pkt); };
     };
     if (initiator) {
-      // unordered, lost packets retried by WebRTC for up to 150 ms (much faster than the game's own resend)
-      setup(p.pc.createDataChannel('ipx', { ordered: false, maxPacketLifeTime: 150 }));
+      // UDP-like: unordered, never retransmitted (losses are covered by the redundant framing)
+      setup(p.pc.createDataChannel('ipx', { ordered: false, maxRetransmits: 0 }));
       p.pc.createOffer().then((o) => p.pc.setLocalDescription(o)).then(() => this.send({ t: 'signal', to: id, data: { sdp: p.pc.localDescription } }));
     } else {
       p.pc.ondatachannel = (e) => setup(e.channel);
@@ -105,7 +151,7 @@ export class Net extends EventTarget {
   }
   sendTo(id, pkt) {
     const p = this.peers.get(id);
-    if (p?.dc?.readyState === 'open') { try { p.dc.send(pkt); return; } catch {} }
+    if (p?.dc?.readyState === 'open') { try { p.dc.send(frame(p.tx, pkt)); return; } catch {} }
     if (this.ws?.readyState === 1) { const f = new Uint8Array(6 + pkt.length); f.set(unhex(id)); f.set(pkt, 6); this.ws.send(f); }
   }
   fromRelay(f) { if (f.length > 6) this.deliver(hex(f.subarray(0, 6)), f.subarray(6)); }
@@ -118,10 +164,38 @@ export class Net extends EventTarget {
     mod._free(p);
   }
 
+  // round trip to a peer: measured on the direct link, else estimated through the relay
+  rttTo(p) { return p.direct && p.rtt != null ? p.rtt : this.relayRtt != null ? this.relayRtt * 2 : null; }
+  shareRtts() {
+    const rtt = {};
+    for (const [id, p] of this.peers) { const r = this.rttTo(p); if (r != null) rtt[id] = Math.round(r); }
+    this.pingTable.set(this.id, rtt);
+    if (this.peers.size) this.send({ t: 'info', data: { rtt } });
+  }
+  // The host's input counts at once, a client's after one round trip to the host,
+  // so the best host is the member whose worst round trip to anyone is smallest.
+  bestHost() {
+    if (!this.peers.size) return null;
+    const ids = [this.id, ...this.peers.keys()];
+    let best = null;
+    for (const a of ids) {
+      let worst = 0;
+      for (const b of ids) if (a !== b) {
+        const r = this.pingTable.get(a)?.[b] ?? this.pingTable.get(b)?.[a];
+        if (r == null) { worst = Infinity; break; }
+        worst = Math.max(worst, r);
+      }
+      if (worst < Infinity && (!best || worst < best.worst)) best = { id: a, worst };
+    }
+    if (!best) return null;
+    return { me: best.id === this.id, name: best.id === this.id ? 'you' : this.peers.get(best.id)?.name, worst: Math.round(best.worst) };
+  }
   summary() {
-    const list = [...this.peers.values()].map((p) =>
-      `${p.name}: ${p.direct ? (p.rtt != null ? Math.round(p.rtt) + ' ms direct' : 'direct') : 'relay' + (this.relayRtt != null ? ' ~' + Math.round(this.relayRtt * 2) + ' ms' : '')}`);
-    return { room: this.room, players: this.peers.size + 1, peers: list };
+    const list = [...this.peers.values()].map((p) => {
+      const r = this.rttTo(p), loss = p.rx.hi ? Math.round(100 * Math.max(0, p.rx.gaps - p.rx.recovered) / p.rx.hi) : 0;
+      return `${p.name}: ${r != null ? Math.round(r) + ' ms ' : ''}${p.direct ? 'direct' : 'relay'}${loss ? ` ${loss}% lost` : ''}`;
+    });
+    return { room: this.room, players: this.peers.size + 1, peers: list, best: this.bestHost() };
   }
 }
 

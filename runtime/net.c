@@ -79,6 +79,9 @@ static void transport_send(const uint8_t dst[6], const uint8_t *pkt, int len);
 /* a packet from the network (any thread) */
 void net_deliver(const uint8_t src[6], const uint8_t *p, int len) {
     if (len < 4) return;
+    static double loss = -1;            /* RT_NET_LOSS=percent: drop incoming packets (testing) */
+    if (loss < 0) { const char *e = getenv("RT_NET_LOSS"); loss = e ? atof(e) / 100.0 : 0; }
+    if (loss > 0 && (double)rand() / RAND_MAX < loss) { stats.drop++; return; }
     uint16_t dport = (uint16_t)(p[0] << 8 | p[1]), sport = (uint16_t)(p[2] << 8 | p[3]);
     trace_pkt("in ", src, dport, sport, p + 4, len - 4);
     pthread_mutex_lock(&mu);

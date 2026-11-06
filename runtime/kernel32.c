@@ -1,6 +1,9 @@
 /* KERNEL32 reimplementation. */
 #define _GNU_SOURCE
 #include "rt.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -70,10 +73,19 @@ int fs_map(const char *gp, char *out, size_t outsz) {
 static uint32_t set_event(uint32_t h, int sig, int pulse);
 typedef struct { int fd; char path[1024]; } File;
 
+static int is_nul_device(const char *p) {
+    const char *b = p;
+    for (const char *q = p; *q; q++) if (*q == '\\' || *q == '/') b = q + 1;
+    return (b[0] | 32) == 'n' && (b[1] | 32) == 'u' && (b[2] | 32) == 'l' && (!b[3] || b[3] == '.' || b[3] == ':');
+}
 static uint32_t k_CreateFileA(CPU *c, const uint32_t *a) {
     const char *gp = HSTR(A(0)); uint32_t access = A(1), disp = A(4);
     if (!gp || !*gp) { rt_log("CreateFileA(\"\") rejected (empty path)"); tls_lasterr = 3; return INVALID_HANDLE; }
     char hp[1024]; fs_map(gp, hp, sizeof hp);
+    if (is_nul_device(gp)) {   /* Windows' NUL device (any dir, any extension, "nul:"): reads EOF, writes vanish */
+        snprintf(hp, sizeof hp, "/dev/null");
+        disp = 3;   /* OPEN_EXISTING */
+    }
     struct stat dst;
     if (!stat(hp, &dst) && S_ISDIR(dst.st_mode)) { tls_lasterr = 5; return INVALID_HANDLE; }  /* ERROR_ACCESS_DENIED */
     int fl = 0;
@@ -87,6 +99,7 @@ static uint32_t k_CreateFileA(CPU *c, const uint32_t *a) {
     case 5: fl |= O_TRUNC; break;            /* TRUNCATE_EXISTING */
     }
     int fd = open(hp, fl, 0644);
+    if (fd < 0 && is_nul_device(gp)) fd = open("/tmp/rt-nul", O_RDWR | O_CREAT | O_TRUNC, 0644);  /* no /dev/null */
     if (fd < 0) {
         if (rt_verbose) rt_log("CreateFileA(%s) -> not found (%s)", gp, hp);
         tls_lasterr = ERROR_FILE_NOT_FOUND; return INVALID_HANDLE;
@@ -453,7 +466,13 @@ static uint32_t k_GetCurrentThreadId(CPU *c, const uint32_t *a) { return (uint32
 static uint32_t k_GetCurrentProcess(CPU *c, const uint32_t *a) { return 0xFFFFFFFFu; }
 static uint32_t k_GetCurrentProcessId(CPU *c, const uint32_t *a) { return 0x42; }
 static uint32_t k_SleepEx(CPU *c, const uint32_t *a) { usleep(A(0) ? A(0) * 1000 : 0); if (!A(0)) sched_yield(); return 0; }
-static uint32_t k_ExitProcess(CPU *c, const uint32_t *a) { rt_log("ExitProcess(%u)", A(0)); exit((int)A(0)); }
+static uint32_t k_ExitProcess(CPU *c, const uint32_t *a) {
+    fprintf(stderr, "[rt] ExitProcess(%u)\n", A(0));
+#ifdef __EMSCRIPTEN__
+    MAIN_THREAD_ASYNC_EM_ASM({ if (Module.onGameExit) Module.onGameExit($0); }, A(0));
+#endif
+    exit((int)A(0));
+}
 
 /* TLS */
 static uint32_t tls_used[64];

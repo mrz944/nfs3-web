@@ -8,7 +8,7 @@
 // not enough: browsers allow shared-memory threads and OPFS only on https/localhost.
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { createReadStream, readdirSync, statSync } from 'node:fs';
+import { appendFileSync, createReadStream, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleUpgrade, listenRaw } from './relay.mjs';
@@ -35,8 +35,28 @@ const types = {
   '.wasm': 'application/wasm', '.json': 'application/json', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml',
 };
 
+// client logs: the page POSTs its log to /__log (see main.js); kept in build/clientlogs/
+const logDir = resolve(root, '..', 'build', 'clientlogs');
+const LOG_CAP = 20 << 20;
+function clientLog(req, res) {
+  const sid = (new URL(req.url, 'http://x').searchParams.get('s') || '').replace(/[^a-z0-9-]/gi, '').slice(0, 40);
+  let body = '';
+  req.setEncoding('utf8');
+  req.on('data', (d) => { body += d; if (body.length > 1 << 20) req.destroy(); });
+  req.on('end', () => {
+    res.writeHead(204).end();
+    if (!sid || !body) return;
+    mkdirSync(logDir, { recursive: true });
+    const f = join(logDir, sid + '.log');
+    let size = 0; try { size = statSync(f).size; } catch { console.log(`[client] new session ${sid} (${req.socket.remoteAddress}) -> build/clientlogs/${sid}.log`); }
+    if (size < LOG_CAP) appendFileSync(f, body);
+    for (const l of body.split('\n')) if (/ERROR|ABORT|stall|stopped/.test(l)) console.log(`[client ${sid}] ${l.trim()}`);
+  });
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (req.method === 'POST' && url.pathname === '/__log') { clientLog(req, res); return; }
   let path = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '');
   if (path === '' || path.endsWith('/')) path += 'index.html';
   let base = root;
