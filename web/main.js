@@ -10,6 +10,8 @@ const status = (msg, err = false) => { $('status').textContent = msg; $('status'
 
 // on-page log (the console is hard to reach on some devices); ?log keeps it over the game
 const t0 = performance.now();
+// the log is hidden unless asked for: ?log in the URL, or "Show technical log" (remembered)
+const logWanted = () => { try { return new URLSearchParams(location.search).has('log') || localStorage.getItem('nfs3.log') === '1'; } catch { return false; } };
 function log(...a) {
   const el = $('log'); if (!el) return;
   const line = `${((performance.now() - t0) / 1000).toFixed(1).padStart(6)}  ${a.join(' ')}\n`;
@@ -29,6 +31,16 @@ function flushLog(beacon = false) {
   try { if (beacon) navigator.sendBeacon(url, body); else fetch(url, { method: 'POST', body, keepalive: body.length < 60000 }).catch(() => {}); } catch {}
 }
 setInterval(flushLog, 3000);
+
+// page analytics (web/analytics.mjs on our own server: no cookies, no third parties)
+function track(e, d = {}) {
+  const body = JSON.stringify({ e, s: logSession, d });
+  try { if (!navigator.sendBeacon('__event', body)) fetch('__event', { method: 'POST', body, keepalive: true }).catch(() => {}); } catch {}
+}
+const pageT0 = Date.now();
+let playStats = { played: false, frames: 0, ms: 0 };
+track('view', { w: innerWidth, h: innerHeight, lang: navigator.language, room_link: !!location.hash.match(/room=/) });
+window.addEventListener('pagehide', () => track('end', { secs: (Date.now() - pageT0) / 1000, played: playStats.played, fps: playStats.ms ? playStats.frames * 1000 / playStats.ms : 0 }));
 window.addEventListener('pagehide', () => flushLog(true));
 for (const k of ['log', 'warn', 'error']) { const orig = console[k].bind(console); console[k] = (...a) => { orig(...a); log(...a.map(String)); }; }
 window.addEventListener('error', (e) => log('ERROR', e.message, e.filename ? `${e.filename}:${e.lineno}` : ''));
@@ -215,6 +227,9 @@ async function start() {
   $('start').disabled = true;
   status('Loading the recompiled game…');
   await ensureIni();
+  const startT = performance.now();
+  track('start', { online: !!net.id });
+  if (net.id) track('online_start', { players: net.peers.size + 1 });
   if (net.id) log(`online: room ${net.room} "${net.info?.name}", ${net.peers.size + 1} player(s), node ${net.id}`);
   log('loading dist/nfs3.js');
   const { default: NFS3 } = await import('./dist/nfs3.js');
@@ -222,9 +237,9 @@ async function start() {
   const mod = await NFS3({
     setStatus: (t) => t && log('[emscripten]', t),
     monitorRunDependencies: (n) => log('[emscripten] pending dependencies:', n),
-    onAbort: (what) => { log('ABORT', what); gameStopped('The game stopped: ' + what); },
-    onGameMessage: (t) => log('ERROR game message:', t),
-    onGameExit: (code) => { log('ERROR game exited, code', code); gameStopped('The game closed itself (see the log). Reload the page to start again.'); },
+    onAbort: (what) => { log('ABORT', what); track('error', { kind: 'abort', msg: String(what) }); gameStopped('The game stopped: ' + what); },
+    onGameMessage: (t) => { log('ERROR game message:', t); track('error', { kind: 'message', msg: t }); },
+    onGameExit: (code) => { log('ERROR game exited, code', code); track('error', { kind: 'exit', msg: 'code ' + code }); gameStopped('The game closed itself (see the log). Reload the page to start again.'); },
     arguments: ['/opfs/nfs3'],
     print: (t) => console.log(t),
     printErr: (t) => console.log(t),
@@ -232,10 +247,11 @@ async function start() {
   log('runtime ready, game thread running');
   if (net.id) { mod.ccall('rt_net_set_node', null, ['string'], [net.id]); net.attach(mod); net.setState('game'); showNetBadge(); }
   // keep the log over the game until frames arrive (always with ?log)
-  const keepLog = new URLSearchParams(location.search).has('log');
+  const keepLog = logWanted();
   $('log').classList.add('overlay'); document.body.appendChild($('log'));
+  $('log').hidden = !keepLog;
   gameStarted = true;
-  $('setup-wrap').hidden = true;
+  $('setup-wrap').hidden = true; $('bg').hidden = true;
   $('screen').style.display = 'block';
   $('hint').hidden = false;
   const canvas = $('canvas');
@@ -253,13 +269,16 @@ async function start() {
       if (stalled) log(`stall over after ${((performance.now() - lastFresh) / 1000).toFixed(1)} s`);
       stalled = false; lastFresh = performance.now();
       fpsN++;
-      if (first) { first = false; log('first frame'); if (!keepLog) setTimeout(() => { $('log').hidden = true; }, 4000); }
+      if (first) { first = false; log('first frame'); track('first_frame', { secs: (performance.now() - startT) / 1000 }); playStats.played = true; }
+      playStats.frames++;
     }
     const now = performance.now();
     if (first && !stalled && now - lastFresh > 30000) { stalled = true; log('stall: no first frame 30 s after start'); }
     if (!first && !stalled && now - lastFresh > 5000 && document.visibilityState === 'visible') {
-      stalled = true; log('stall: no new frame from the game for 5 s');
+      stalled = true; log('stall: no new frame from the game for 5 s'); track('error', { kind: 'stall', msg: 'no frame for 5 s' });
     }
+    if (!first) playStats.ms += now - (frame.last ?? now);
+    frame.last = now;
     if (now - fpsT >= 1000) { $('fps').textContent = `${Math.round(fpsN * 1000 / (now - fpsT))} fps`; fpsN = 0; fpsT = now; }
     requestAnimationFrame(frame);
   }
@@ -303,6 +322,8 @@ function setupOnline() {
   // ---- room list
   function drawRooms() {
     const tb = $('rooms').tBodies[0]; tb.textContent = '';
+    const racers = String(Math.min(999, net.rooms.reduce((n, r) => n + r.players.length, 0))).padStart(3, '0');
+    $('online-count').replaceChildren(...[...racers].map((d) => el('i', { textContent: d })));
     const rooms = [...net.rooms].sort((a, b) => (a.racing - b.racing) || (b.players.length - a.players.length) || (b.created - a.created));
     $('rooms-empty').hidden = rooms.length > 0; $('rooms').hidden = !rooms.length;
     for (const r of rooms) {
@@ -353,6 +374,7 @@ function setupOnline() {
     try {
       await net.join(code, myName(), password);
       savePass(code, password);
+      track('room_join', { locked: !!password });
       history.replaceState(null, '', '#room=' + code);
       $('pass-form').hidden = true; joining = null;
     } catch (e) {
@@ -387,6 +409,7 @@ function setupOnline() {
     try {
       const w = await net.create({ name: $('c-name').value.trim(), password: pw, max: Number($('c-max').value), listed: $('c-listed').checked }, myName());
       savePass(w.room, pw);
+      track('room_create', { max: Number($('c-max').value), locked: !!pw, listed: $('c-listed').checked });
       history.replaceState(null, '', '#room=' + w.room);
       $('create-form').hidden = true;
     } catch (err) { message(err.message); }
@@ -420,7 +443,24 @@ function setupOnline() {
   connect();
 }
 
+const TIPS = [
+  'Hold the handbrake through tight corners to slide around them.',
+  'In Hot Pursuit, the police set up roadblocks and spike strips ahead. Watch the radar.',
+  'Manual transmission is faster once you get the hang of it.',
+  'Online: whoever has the lowest ping should create the game. The host never lags.',
+  'Two racers? Pick Peer-to-Peer in the host dialog so both get the same responsiveness.',
+  'Click the picture to capture the mouse. Esc gives it back.',
+  'Car Showcase has history, interiors and a slide show for every car.',
+];
+function setupLogToggle() {
+  const t = $('log-toggle');
+  const draw = () => { $('log').hidden = !logWanted(); t.textContent = logWanted() ? 'Hide technical log' : 'Show technical log'; };
+  t.onclick = (e) => { e.preventDefault(); try { localStorage.setItem('nfs3.log', logWanted() ? '0' : '1'); } catch {} draw(); };
+  draw();
+}
 async function init() {
+  setupLogToggle();
+  $('tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
   setupOnline();
   log('page loaded; crossOriginIsolated =', crossOriginIsolated, '; SharedArrayBuffer =', typeof SharedArrayBuffer);
   if (!crossOriginIsolated) {
@@ -438,6 +478,7 @@ async function init() {
   };
   $('pick').addEventListener('change', async (e) => {
     try { await importFolder(e.target.files); } catch (err) { status(err.message, true); $('progress').hidden = true; return; }
+    track('import', { files: e.target.files.length });
     await refresh();
   });
   $('forget').addEventListener('click', async () => {

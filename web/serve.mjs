@@ -11,7 +11,8 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, createReadStream, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handleUpgrade, listenRaw } from './relay.mjs';
+import { handleUpgrade, listenRaw, roomStats } from './relay.mjs';
+import { createAnalytics } from './analytics.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 // --game DIR (dev only): serve a local game folder at /__dev/game/ so the page's
@@ -54,8 +55,13 @@ function clientLog(req, res) {
   });
 }
 
+// page analytics (analytics.mjs): events in build/analytics/, summary at /__stats
+const analytics = createAnalytics(resolve(root, '..', 'build', 'analytics'));
+
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (req.method === 'POST' && url.pathname === '/__event') { analytics.handleEvent(req, res); return; }
+  if (url.pathname === '/__stats') { analytics.handleStats(req, res, roomStats); return; }
   if (req.method === 'POST' && url.pathname === '/__log') { clientLog(req, res); return; }
   let path = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '');
   if (path === '' || path.endsWith('/')) path += 'index.html';
@@ -85,6 +91,7 @@ server.on('upgrade', (req, sock) => { if (new URL(req.url, 'http://x').pathname 
 if (rawPort) listenRaw(rawPort);
 server.listen(port, '127.0.0.1', () => {
   console.log(`NFS3 web runtime: http://localhost:${port}/` + (gameDir ? `  (dev game folder: ${gameDir}, open ?devimport)` : ''));
+  console.log(`stats:            http://localhost:${port}/__stats`);
   if (tsPort) startTailscale();
 });
 

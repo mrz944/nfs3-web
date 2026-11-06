@@ -4,139 +4,357 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NFS3 Web Runtime</title>
+<!--
+  Look: the game's own front end circa 1998-2002 (deep blue, big rings, gold arc,
+  yellow italic headings, pill buttons that light up), as a fan page from that era.
+  Everything is CSS/SVG: no EA logos or artwork are shipped with this page.
+-->
 <style>
-  :root { --bg: #0b0d12; --panel: #161a23; --text: #e8eaf0; --muted: #9aa3b5; --accent: #5aa0ff; --err: #ff6b6b; }
+  :root {
+    --night: #010622; --navy: #041250; --blue: #0b2a9e; --royal: #1d4fe6; --sky: #79b8ff;
+    --gold: #ffd000; --amber: #ff9900; --text: #eef2ff; --muted: #9fb0e6; --err: #ff6b6b; --ok: #7ddc9b;
+    --panel: rgba(3, 10, 52, .78); --line: rgba(120, 150, 255, .28);
+    --ui: Verdana, Tahoma, "DejaVu Sans", Geneva, sans-serif;
+    --head: "Arial Black", "Arial Bold", Gadget, "Helvetica Neue", Arial, sans-serif;
+  }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { min-height: 100%; display: grid; place-items: center; padding: 16px; }
-  #setup { max-width: 560px; width: 100%; background: var(--panel); border-radius: 12px; padding: 24px; }
-  h1 { font-size: 20px; margin: 0 0 8px; }
-  p { color: var(--muted); margin: 8px 0; }
-  button, label.btn { display: inline-block; background: var(--accent); color: #fff; border: 0; border-radius: 8px;
-    padding: 10px 16px; font: inherit; cursor: pointer; margin-top: 12px; }
-  button:disabled { opacity: .5; cursor: default; }
-  button.secondary { background: transparent; color: var(--muted); border: 1px solid #2a3040; }
-  progress { width: 100%; height: 8px; margin-top: 12px; }
-  #status { min-height: 1.5em; }
-  .err { color: var(--err); }
-  #screen { display: none; width: 100vw; height: 100vh; background: #000; }
-  canvas { width: 100%; height: 100%; display: block; image-rendering: auto; }
-  #fps { position: fixed; right: 10px; bottom: 8px; color: #fff9; font: 12px ui-monospace, monospace; pointer-events: none; }
-  #hint { position: fixed; left: 12px; bottom: 8px; color: #fff8; font-size: 12px; pointer-events: none; }
-  input[type=file] { display: none; }
-  #online { margin-top: 20px; padding-top: 16px; border-top: 1px solid #2a3040; }
-  .online-head, .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  #online h2 { font-size: 16px; margin: 0; }
-  #online h3 { font-size: 14px; margin: 0; }
-  #online section { margin-top: 14px; }
-  .pill { font-size: 12px; color: var(--muted); border: 1px solid #2a3040; border-radius: 999px; padding: 2px 10px; }
-  .pill.ok { color: #7ddc9b; border-color: #2d5a3c; }
-  .pill.bad { color: var(--err); border-color: #5a2d2d; }
-  .namebox { margin-top: 10px; }
-  #online input, #online select { background: #0b0d12; color: var(--text); border: 1px solid #2a3040; border-radius: 6px; padding: 7px 8px; font: inherit; width: 100%; }
-  #online label { display: block; color: var(--muted); font-size: 13px; }
-  #online .check { display: flex; align-items: center; gap: 8px; align-self: end; padding-bottom: 8px; }
+  html, body { margin: 0; min-height: 100%; background: var(--night); color: var(--text); font: 13px/1.55 var(--ui); }
+  a { color: var(--sky); }
+
+  /* ------------------------------------------------------------ backdrop */
+  #bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+    background: radial-gradient(ellipse 80% 70% at 68% 46%, #2350e8 0%, #0e2fa8 28%, #061a72 52%, #030b3d 76%, var(--night) 100%); }
+  #bg .ring { position: absolute; border-radius: 50%; left: 68%; top: 46%; transform: translate(-50%, -50%); }
+  #bg .r1 { width: 118vmax; height: 118vmax; border: 9vmax solid rgba(30, 70, 220, .22); box-shadow: inset 0 0 6vmax rgba(0, 0, 40, .6), 0 0 4vmax rgba(0, 10, 60, .5); }
+  #bg .r2 { width: 74vmax; height: 74vmax; border: 2.6vmax solid rgba(90, 140, 255, .14);
+    background: conic-gradient(from 0deg, transparent 0 8%, rgba(120, 170, 255, .10) 8% 14%, transparent 14% 33%, rgba(120, 170, 255, .08) 33% 38%, transparent 38% 58%, rgba(120, 170, 255, .10) 58% 64%, transparent 64% 83%, rgba(120, 170, 255, .08) 83% 88%, transparent 88%);
+    -webkit-mask: radial-gradient(circle, transparent 54%, #000 55%); mask: radial-gradient(circle, transparent 54%, #000 55%);
+    animation: spin 90s linear infinite; }
+  #bg .r3 { width: 46vmax; height: 46vmax; border: 1.2vmax solid rgba(110, 160, 255, .16); box-shadow: 0 0 3vmax rgba(80, 130, 255, .25) inset; animation: spin 140s linear infinite reverse;
+    border-top-color: rgba(170, 210, 255, .35); border-bottom-color: rgba(170, 210, 255, .05); }
+  #bg .stripes { position: absolute; right: 0; top: 0; bottom: 0; width: 22vw;
+    background: repeating-linear-gradient(180deg, rgba(160, 190, 255, .10) 0 2px, transparent 2px 6px);
+    -webkit-mask: linear-gradient(90deg, transparent, #000 70%); mask: linear-gradient(90deg, transparent, #000 70%); }
+  #bg .ghost { position: absolute; font: italic 900 9vmax/1 var(--head); color: rgba(150, 180, 255, .06); letter-spacing: -.02em; white-space: nowrap; transform: skewX(-10deg); }
+  #bg .g1 { left: 34%; top: 18%; } #bg .g2 { left: 46%; top: 60%; font-size: 6vmax; } #bg .g3 { left: 30%; top: 78%; font-size: 4.5vmax; }
+  #bg .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .16) 0 1px, transparent 1px 3px); mix-blend-mode: multiply; }
+  #arc { position: absolute; left: 0; top: 0; width: 100%; height: 190px; }
+  @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #bg .r2, #bg .r3, .ticker span { animation: none !important; } }
+
+  /* --------------------------------------------------------------- frame */
+  #setup-wrap { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; max-width: 1080px; margin: 0 auto; padding: 18px 16px 10px; }
+  header { display: flex; align-items: center; gap: 14px; min-height: 104px; }
+  .orb { flex: none; width: 92px; height: 92px; border-radius: 50%; position: relative;
+    background: radial-gradient(circle at 36% 30%, #b9dcff 0 6%, #4b8dff 16%, #1442c8 42%, #061a6e 70%, #020a35 100%);
+    box-shadow: 0 0 0 5px #0a1c66, 0 0 0 7px #4d7cff, 0 0 0 11px #0a1c66, 0 0 26px 8px rgba(70, 130, 255, .55); }
+  .orb::after { content: ""; position: absolute; inset: 18%; border-radius: 50%; border: 3px solid rgba(190, 220, 255, .35); border-left-color: transparent; border-bottom-color: transparent; transform: rotate(-20deg); }
+  .orb::before { content: "III"; position: absolute; inset: 0; display: grid; place-items: center; font: italic 900 26px var(--head); color: rgba(225, 240, 255, .92);
+    text-shadow: 0 2px 0 #031047, 0 0 10px rgba(140, 190, 255, .9); letter-spacing: -1px; }
+  .titles { min-width: 0; }
+  h1 .h2 { display: block; font-size: .62em; letter-spacing: .12em; margin-top: 4px; }
+  .kicker { font: bold 11px var(--ui); letter-spacing: .32em; text-transform: uppercase; color: var(--sky); text-shadow: 0 0 8px rgba(80, 140, 255, .8); }
+  h1, .h { margin: 0; font: italic 900 clamp(26px, 4.6vw, 44px)/1 var(--head); letter-spacing: .02em; text-transform: uppercase; transform: skewX(-8deg); transform-origin: left;
+    background: linear-gradient(180deg, #fff6a8 0%, #ffe000 38%, #ffb400 62%, #ff8a00 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(2px 2px 0 #2a1400) drop-shadow(0 0 10px rgba(255, 190, 0, .35)); }
+  .sub { color: #dfe7ff; font: italic bold 13px var(--ui); letter-spacing: .14em; text-transform: uppercase; margin-top: 6px; text-shadow: 0 1px 0 #000; }
+
+  .layout { display: grid; grid-template-columns: 230px 1fr; gap: 18px; margin-top: 18px; align-items: start; flex: 1; }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } .orb { width: 70px; height: 70px; } header { min-height: 80px; } }
+
+  /* ------------------------------------------------------- menu buttons */
+  nav.menu { display: flex; flex-direction: column; gap: 12px; padding-top: 6px; }
+  .mbtn, button, label.btn { font: bold 13px var(--ui); color: #fff; cursor: pointer; border: 0; margin: 0; white-space: nowrap; }
+  .mbtn { position: relative; display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 30px 0 16px; text-align: left; text-decoration: none;
+    background: linear-gradient(180deg, #4459c0 0%, #24348c 45%, #141f63 100%); border-radius: 17px 3px 3px 17px;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), inset 0 -2px 0 rgba(0, 0, 30, .5); text-shadow: 0 1px 1px #000; transition: color .12s, background .12s; }
+  .mbtn::after { content: ""; position: absolute; right: 22px; top: 50%; border: 5px solid transparent; border-left: 7px solid rgba(220, 230, 255, .8); transform: translateY(-50%); }
+  .mbtn:hover, .mbtn:focus-visible { color: #ffe23a; outline: none;
+    background: linear-gradient(90deg, #ffe000 0, #ffb000 9px, #5a6ed8 10px, #2c3e9c 46%, #18246c 100%); }
+  .mbtn:hover::after, .mbtn:focus-visible::after { border-left-color: #ffe23a; }
+  .mbtn.go { background: linear-gradient(180deg, #ffe76a 0%, #ffc400 45%, #e88a00 100%); color: #1a0d00; text-shadow: 0 1px 0 rgba(255, 255, 255, .5); }
+  .mbtn.go::after { border-left-color: #2a1400; }
+  .mbtn.go:hover, .mbtn.go:focus-visible { color: #000; background: linear-gradient(180deg, #fff3a0 0%, #ffd700 45%, #ff9d00 100%); filter: drop-shadow(0 0 10px rgba(255, 200, 0, .7)); }
+  .mbtn.go:disabled { filter: grayscale(.7) brightness(.7); cursor: default; }
+  .mbtn.dim { background: linear-gradient(180deg, #2a3570 0%, #18204e 100%); color: #b8c4f0; font-weight: normal; }
+  label.btn input { display: none; }
+  .menu .sep { height: 1px; background: linear-gradient(90deg, transparent, var(--line), transparent); margin: 4px 0; }
+  .menu .hint { color: var(--muted); font-size: 11px; padding: 0 6px; }
+  .tip { margin-top: 10px; border: 1px solid var(--line); border-top: 2px solid var(--gold); background: rgba(3, 10, 52, .7); padding: 8px 10px; font-size: 11px; color: #d0d9fb; }
+  .tip b { display: block; font: italic 900 12px var(--head); color: var(--gold); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+
+  /* small buttons inside panels */
+  button.small, button { background: linear-gradient(180deg, #4d63cc, #233390 55%, #172264); border-radius: 12px 3px 3px 12px; padding: 5px 16px; font-size: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 1px 0 rgba(0, 0, 0, .5); text-shadow: 0 1px 0 #000; }
+  button:not(.mbtn):hover:not(:disabled) { color: #ffe23a; box-shadow: inset 3px 0 0 #ffcc00, inset 0 1px 0 rgba(255, 255, 255, .35), 0 0 10px rgba(255, 200, 0, .25); }
+  button.secondary { background: linear-gradient(180deg, #27306a, #161c48); color: #c3ceff; font-weight: normal; }
+  button:disabled { opacity: .45; cursor: default; }
+
+  /* -------------------------------------------------------------- panels */
+  .panels { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px 14px 4px 14px; box-shadow: 0 10px 30px rgba(0, 0, 20, .55), inset 0 1px 0 rgba(160, 190, 255, .18); overflow: hidden;
+    backdrop-filter: blur(2px); }
+  .panel > .ph { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 14px 7px;
+    background: linear-gradient(180deg, rgba(40, 70, 190, .55), rgba(10, 25, 90, .3)); border-bottom: 1px solid rgba(255, 200, 0, .55); }
+  .panel > .ph h2 { margin: 0; font: italic 900 17px var(--head); letter-spacing: .06em; text-transform: uppercase; color: var(--gold); transform: skewX(-8deg); text-shadow: 1px 1px 0 #2a1400; }
+  .panel > .pb { padding: 12px 14px 14px; }
+  .panel p { margin: 6px 0; }
+  .muted { color: var(--muted); }
+  #status { min-height: 1.5em; font-weight: bold; }
+  #status.err, .err { color: var(--err); }
+  progress { width: 100%; height: 12px; margin-top: 8px; appearance: none; -webkit-appearance: none; border: 1px solid #3a4c9c; background: #050b30; border-radius: 2px; }
+  progress::-webkit-progress-bar { background: #050b30; }
+  progress::-webkit-progress-value { background: repeating-linear-gradient(90deg, #ffd000 0 10px, #ff9e00 10px 12px); }
+  progress::-moz-progress-bar { background: repeating-linear-gradient(90deg, #ffd000 0 10px, #ff9e00 10px 12px); }
+  .specs { display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; margin: 8px 0 0; font-size: 12px; }
+  .steps { margin: 0; padding-left: 0; list-style: none; counter-reset: s; }
+  .steps li { counter-increment: s; position: relative; padding: 6px 0 6px 40px; border-bottom: 1px solid rgba(120, 150, 255, .14); color: #d6defc; }
+  .steps li::before { content: counter(s); position: absolute; left: 0; top: 6px; width: 28px; height: 22px; display: grid; place-items: center;
+    font: italic 900 13px var(--head); color: #1a0d00; background: linear-gradient(180deg, #ffe76a, #ffc400 50%, #e88a00); border-radius: 11px 2px 2px 11px; }
+  .steps li b { color: #fff; }
+  .steps + .specs { margin-top: 12px; }
+  .specs dt { color: var(--gold); font-weight: bold; } .specs dd { margin: 0; color: #d6defc; }
+
+  /* ---------------------------------------------------------- online lobby */
+  .pill { font-size: 11px; color: var(--muted); border: 1px solid #34449a; border-radius: 999px; padding: 1px 9px; background: #060d3a; font-weight: bold; letter-spacing: .05em; text-transform: uppercase; }
+  .pill.ok { color: var(--ok); border-color: #2f6a48; } .pill.ok::before { content: "● "; }
+  .pill.bad { color: var(--err); border-color: #6a2f2f; }
+  #online input, #online select { background: #030828; color: var(--text); border: 1px solid #34449a; border-radius: 2px; padding: 5px 7px; font: 13px var(--ui); width: 100%;
+    box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 rgba(120, 150, 255, .2); }
+  #online input:focus, #online select:focus { outline: 1px solid var(--gold); }
+  #online label { display: block; color: var(--muted); font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: .06em; }
+  #online .check { display: flex; align-items: center; gap: 8px; align-self: end; padding-bottom: 6px; text-transform: none; letter-spacing: 0; font-size: 12px; }
   #online .check input { width: auto; }
-  .namebox input { max-width: 260px; display: block; margin-top: 4px; }
-  button.small { margin-top: 0; padding: 6px 12px; font-size: 14px; }
-  .card { background: #0f1219; border: 1px solid #2a3040; border-radius: 10px; padding: 12px; margin-top: 10px; }
+  .namebox { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .namebox input { max-width: 220px; }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; }
+  .bar h3 { margin: 0; font: bold 12px var(--ui); color: #fff; text-transform: uppercase; letter-spacing: .12em; }
+  .bar h3::before { content: "» "; color: var(--gold); }
+  .card { background: rgba(2, 8, 40, .8); border: 1px solid #2e3d8c; border-left: 3px solid var(--gold); padding: 10px 12px; margin-top: 10px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
   .actions { display: flex; gap: 8px; margin-top: 10px; }
-  .msg { color: var(--err); font-size: 14px; }
-  .muted { color: var(--muted); font-size: 13px; }
-  .tablewrap { overflow-x: auto; margin-top: 8px; }
-  #rooms { width: 100%; border-collapse: collapse; font-size: 14px; }
-  #rooms th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid #2a3040; }
-  #rooms td { padding: 8px; border-bottom: 1px solid #1f2430; vertical-align: middle; }
+  .msg { color: var(--err); font-weight: bold; margin: 8px 0 0; }
+  .tablewrap { overflow-x: auto; margin-top: 8px; border: 1px solid #23307a; }
+  #rooms { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #rooms th { text-align: left; color: var(--gold); font-weight: bold; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; padding: 5px 8px;
+    background: linear-gradient(180deg, #1c2d86, #0d1858); }
+  #rooms td { padding: 7px 8px; border-top: 1px solid #16205c; vertical-align: middle; }
+  #rooms tbody tr:nth-child(odd) { background: rgba(30, 50, 150, .18); }
+  #rooms tbody tr:hover { background: rgba(255, 200, 0, .08); }
   #rooms td:last-child { text-align: right; }
-  #rooms .rname { font-weight: 600; }
-  #rooms .sub { color: var(--muted); font-size: 12px; }
-  .tag { display: inline-block; font-size: 11px; border-radius: 4px; padding: 0 5px; margin-left: 6px; background: #2a3040; color: var(--muted); }
-  .tag.race { background: #3a2a10; color: #f0b45a; }
-  .ping-good { color: #7ddc9b; } .ping-ok { color: #e6c86e; } .ping-bad { color: var(--err); }
+  #rooms .rname { font-weight: bold; color: #fff; }
+  #rooms .sub { color: var(--muted); font: 11px var(--ui); letter-spacing: 0; text-transform: none; margin: 0; text-shadow: none; }
+  .tag { display: inline-block; font-size: 9px; font-weight: bold; text-transform: uppercase; letter-spacing: .06em; border-radius: 2px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; background: #2a3a8a; color: #c8d2ff; }
+  .tag.race { background: #ffb400; color: #2a1400; }
+  .ping-good { color: var(--ok); font-weight: bold; } .ping-ok { color: #ffd65a; font-weight: bold; } .ping-bad { color: var(--err); font-weight: bold; }
+  #rooms-empty { margin-top: 10px; }
   #members { list-style: none; padding: 0; margin: 10px 0; }
-  #members li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; background: #0f1219; border-radius: 6px; margin-bottom: 4px; font-size: 14px; }
+  #members li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; margin-bottom: 3px; font-size: 12px;
+    background: linear-gradient(90deg, rgba(40, 70, 190, .35), rgba(10, 20, 80, .2)); border-left: 3px solid #4d6dff; }
+  #members li:first-child { border-left-color: var(--gold); }
+  #room-title .tag { font-size: 9px; }
   #share { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-  #share code { background: #0b0d12; border-radius: 6px; padding: 7px 8px; word-break: break-all; flex: 1 1 240px; color: var(--accent); font-size: 13px; }
-  .howto { font-size: 13px; }
-  #netbadge { position: fixed; left: 10px; top: 8px; z-index: 4; background: #000a; color: #fffc; border-radius: 8px; padding: 6px 10px;
-    font: 12px/1.4 system-ui, sans-serif; cursor: pointer; max-width: 70vw; }
-  #log { margin-top: 16px; max-height: 260px; overflow: auto; background: #0008; border-radius: 8px; padding: 8px;
-    font: 12px/1.4 ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; word-break: break-all; }
+  #share code { background: #030828; border: 1px dashed #3a4c9c; padding: 6px 8px; word-break: break-all; flex: 1 1 240px; color: var(--gold); font: 12px ui-monospace, "Courier New", monospace; }
+  .howto { font-size: 12px; color: #d0d9fb; }
+  .howto b { color: #fff; }
+
+  /* ---------------------------------------------------------- 2002 extras */
+  .ticker { margin-top: 14px; overflow: hidden; white-space: nowrap; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    background: linear-gradient(90deg, rgba(0, 0, 30, .7), rgba(20, 40, 140, .45), rgba(0, 0, 30, .7)); font: bold 11px var(--ui); color: #cfe0ff; padding: 4px 0; letter-spacing: .04em; }
+  .ticker span { display: inline-block; padding-left: 100%; animation: tick 38s linear infinite; animation-delay: -9s; }
+  .ticker b { color: var(--gold); }
+  @keyframes tick { to { transform: translateX(-100%); } }
+  footer { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; color: #8796cc; font-size: 10px; padding-bottom: 6px; }
+  .credits { text-align: right; } .credits a { color: var(--gold); text-decoration: none; font-weight: bold; } .credits a:hover { text-decoration: underline; }
+  @media (max-width: 760px) { .credits { text-align: left; } }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { width: 88px; height: 31px; display: grid; place-items: center; text-align: center; line-height: 1.05; font: bold 9px var(--ui); text-transform: uppercase; letter-spacing: .03em; color: #fff;
+    border: 1px solid #000; box-shadow: inset 1px 1px 0 rgba(255, 255, 255, .45), inset -1px -1px 0 rgba(0, 0, 0, .5); }
+  .badge.b1 { background: linear-gradient(180deg, #3a64ff, #0d2a9c); } .badge.b2 { background: linear-gradient(180deg, #ffd000, #d47a00); color: #1a0d00; }
+  .badge.b3 { background: #000; color: #7df07d; font-family: "Courier New", monospace; } .badge.b4 { background: linear-gradient(180deg, #c0c0c0, #7a7a7a); color: #111; }
+  .counter { display: inline-flex; gap: 1px; margin-left: 6px; vertical-align: middle; }
+  .counter i { font: bold 13px "Courier New", monospace; font-style: normal; background: #000; color: #ff3b1f; padding: 0 3px; border: 1px solid #333; text-shadow: 0 0 4px #ff3b1f; }
+
+  /* -------------------------------------------------------------- in game */
+  #screen { display: none; position: fixed; inset: 0; z-index: 2; width: 100vw; height: 100vh; background: #000; }
+  canvas { width: 100%; height: 100%; display: block; image-rendering: auto; }
+  #fps { position: fixed; z-index: 3; right: 10px; bottom: 8px; color: #fff9; font: 11px ui-monospace, monospace; pointer-events: none; }
+  #hint { position: fixed; z-index: 3; left: 12px; bottom: 8px; color: #fff8; font-size: 11px; pointer-events: none; }
+  #netbadge { position: fixed; left: 10px; top: 8px; z-index: 4; background: linear-gradient(180deg, rgba(36, 56, 160, .85), rgba(10, 20, 80, .85)); color: #fff;
+    border-radius: 12px 3px 3px 12px; border-left: 3px solid var(--gold); padding: 4px 12px; font: bold 11px var(--ui); cursor: pointer; max-width: 70vw; text-shadow: 0 1px 0 #000; }
+  #log { margin-top: 12px; max-height: 220px; overflow: auto; background: rgba(0, 0, 20, .7); border: 1px solid #23307a; padding: 8px;
+    font: 11px/1.4 ui-monospace, "Courier New", monospace; color: #9fb0e6; white-space: pre-wrap; word-break: break-all; }
   #log:empty { display: none; }
+  .logtoggle { margin: 8px 0 0; font-size: 11px; } .logtoggle a { color: var(--muted); }
   #log.overlay { position: fixed; right: 8px; top: 8px; width: min(560px, 90vw); max-height: 40vh; margin: 0; z-index: 5; }
 </style>
 </head>
 <body>
+<div id="bg" aria-hidden="true">
+  <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+  <div class="stripes"></div>
+  <div class="ghost g1">HOT PURSUIT</div><div class="ghost g2">WEB RUNTIME</div><div class="ghost g3">1998 · 2002</div>
+  <svg id="arc" viewBox="0 0 1000 190" preserveAspectRatio="none">
+    <defs><linearGradient id="gold" x1="0" x2="1"><stop offset="0" stop-color="#ffcc00" stop-opacity="0"/><stop offset=".15" stop-color="#ffd84a"/><stop offset=".75" stop-color="#ffb000"/><stop offset="1" stop-color="#ff8a00" stop-opacity=".9"/></linearGradient></defs>
+    <path d="M540 60 C 700 48, 860 80, 1000 150" fill="none" stroke="url(#gold)" stroke-width="3"/>
+    <path d="M540 68 C 700 56, 860 88, 1000 158" fill="none" stroke="#ffcc00" stroke-opacity=".25" stroke-width="1"/>
+  </svg>
+  <div class="scan"></div>
+</div>
+
 <main id="setup-wrap">
-  <section id="setup">
-    <h1>NFS3 Web Runtime</h1>
-    <p>Runs your own copy of Need for Speed III: Hot Pursuit (PC, modern patch) in the browser.
-       Your game folder is copied into this browser's private storage once; nothing is uploaded.</p>
-    <p id="status"></p>
-    <progress id="progress" max="1" value="0" hidden></progress>
-    <div>
-      <label class="btn" id="pick-label" hidden>Choose NFS3 folder…<input type="file" id="pick" webkitdirectory multiple></label>
-      <button id="start" hidden>Start</button>
-      <button id="forget" class="secondary" hidden>Remove stored game files</button>
+  <header>
+    <div class="orb" aria-hidden="true"></div>
+    <div class="titles">
+      <div class="kicker">Web Runtime</div>
+      <h1>Need for Speed III<span class="h2">Hot Pursuit</span></h1>
     </div>
-    <div id="online">
-      <div class="online-head">
-        <h2>Online play</h2>
-        <span id="server-state" class="pill">connecting…</span>
-      </div>
-      <div class="namebox">
-        <label for="pname">Your name</label>
-        <input id="pname" maxlength="16" autocomplete="nickname" placeholder="Player">
-      </div>
-      <p id="lobby-msg" class="msg" hidden></p>
+  </header>
 
-      <section id="lobby">
-        <div class="bar">
-          <h3>Rooms</h3>
-          <button id="show-create" class="small">Create room</button>
+  <div class="layout">
+    <nav class="menu" aria-label="Game">
+      <button id="start" class="mbtn go" hidden>Start Game</button>
+      <label class="btn mbtn" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
+      <a class="mbtn" href="#online">Online Play…</a>
+      <a class="mbtn" href="#guide">How to Race Online…</a>
+      <a class="mbtn" href="#about">Read Me…</a>
+      <div class="sep"></div>
+      <button id="forget" class="mbtn dim" hidden>Remove Game Files</button>
+      <div class="hint">Your game folder stays in this browser. Nothing is uploaded.</div>
+      <div class="tip"><b>Tip of the day</b><span id="tip">Hold the handbrake through tight corners to slide around them.</span></div>
+    </nav>
+
+    <div class="panels" id="setup">
+      <section class="panel">
+        <div class="ph"><h2>Status</h2></div>
+        <div class="pb">
+          <p id="status"></p>
+          <progress id="progress" max="1" value="0" hidden></progress>
+          <div id="log" hidden></div>
+          <p class="logtoggle"><a href="#" id="log-toggle">Show technical log</a></p>
         </div>
-        <form id="create-form" class="card" hidden autocomplete="off">
-          <div class="grid">
-            <label>Room name <input id="c-name" maxlength="32" placeholder="My room"></label>
-            <label>Password <input id="c-pass" type="password" maxlength="64" placeholder="none"></label>
-            <label>Players <select id="c-max"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option selected>8</option></select></label>
-            <label class="check"><input id="c-listed" type="checkbox" checked> Show in the room list</label>
+      </section>
+
+      <section class="panel" id="online">
+        <div class="ph"><h2>Online Play</h2><span id="server-state" class="pill">connecting…</span></div>
+        <div class="pb">
+          <div class="namebox">
+            <label for="pname">Your name</label>
+            <input id="pname" maxlength="16" autocomplete="nickname" placeholder="Player">
+            <span class="muted">Racers online:<span class="counter" id="online-count"><i>0</i><i>0</i><i>0</i></span></span>
           </div>
-          <div class="actions"><button type="submit" class="small">Create</button><button type="button" id="c-cancel" class="small secondary">Cancel</button></div>
-        </form>
-        <form id="pass-form" class="card" hidden autocomplete="off">
-          <label><span id="pass-label">Password</span> <input id="j-pass" type="password" maxlength="64"></label>
-          <div class="actions"><button type="submit" class="small">Join</button><button type="button" id="j-cancel" class="small secondary">Cancel</button></div>
-        </form>
-        <div class="tablewrap">
-          <table id="rooms">
-            <thead><tr><th>Room</th><th>Players</th><th title="Estimated round trip through the server; a direct connection is usually faster">Ping</th><th></th></tr></thead>
-            <tbody></tbody>
-          </table>
+          <p id="lobby-msg" class="msg" hidden></p>
+
+          <section id="lobby">
+            <div class="bar">
+              <h3>Rooms</h3>
+              <button id="show-create" class="small">Create Room</button>
+            </div>
+            <form id="create-form" class="card" hidden autocomplete="off">
+              <div class="grid">
+                <label>Room name <input id="c-name" maxlength="32" placeholder="My room"></label>
+                <label>Password <input id="c-pass" type="password" maxlength="64" placeholder="none"></label>
+                <label>Players <select id="c-max"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option selected>8</option></select></label>
+                <label class="check"><input id="c-listed" type="checkbox" checked> Show in the room list</label>
+              </div>
+              <div class="actions"><button type="submit" class="small">Create</button><button type="button" id="c-cancel" class="small secondary">Cancel</button></div>
+            </form>
+            <form id="pass-form" class="card" hidden autocomplete="off">
+              <label><span id="pass-label">Password</span> <input id="j-pass" type="password" maxlength="64"></label>
+              <div class="actions"><button type="submit" class="small">Join</button><button type="button" id="j-cancel" class="small secondary">Cancel</button></div>
+            </form>
+            <div class="tablewrap">
+              <table id="rooms">
+                <thead><tr><th>Room</th><th>Players</th><th title="Estimated round trip through the server; a direct connection is usually faster">Ping</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p id="rooms-empty" class="muted">No open rooms yet. Create one and invite your friends.</p>
+          </section>
+
+          <section id="inroom" hidden>
+            <div class="bar">
+              <h3 id="room-title"></h3>
+              <button id="leave-room" class="small secondary">Leave Room</button>
+            </div>
+            <ul id="members"></ul>
+            <p id="best-host" class="muted"></p>
+            <div id="share"><code id="share-link"></code><button id="copy-link" class="small secondary">Copy invite link</button></div>
+            <p class="howto">Everyone clicks <b>Start Game</b>. In the game: <b>Connect Players → Network IPX</b>. One player
+              (ideally the best host) picks <b>Create Game</b>; the others choose the game under <b>Games Available</b>
+              and click <b>Join Game</b>. For two players, <b>Peer-to-Peer</b> gives both players the same responsiveness.</p>
+          </section>
         </div>
-        <p id="rooms-empty" class="muted">No open rooms yet. Create one and invite your friends.</p>
       </section>
 
-      <section id="inroom" hidden>
-        <div class="bar">
-          <h3 id="room-title"></h3>
-          <button id="leave-room" class="small secondary">Leave room</button>
+      <section class="panel" id="guide">
+        <div class="ph"><h2>How to Race Online</h2></div>
+        <div class="pb">
+          <ol class="steps">
+            <li><b>Get the game into this browser.</b> Every player needs their own NFS3 folder (PC, modern patch).
+              Click <i>Choose NFS3 Folder…</i> and pick the folder with <b>nfs3.exe</b>. This happens once; next time it's already here.</li>
+            <li><b>Pick a name.</b> Type it under <i>Online Play → Your name</i>. It's what the others see in the room.</li>
+            <li><b>Make a room.</b> One player clicks <i>Create Room</i>, gives it a name, and optionally a password and a player limit (2–8).
+              Untick <i>Show in the room list</i> for a private room.</li>
+            <li><b>Bring your friends in.</b> Click <i>Copy invite link</i> and send it, or let them pick the room in the <i>Rooms</i> list and click <i>Join</i>.
+              Everyone in the room is listed with their ping and <i>direct</i> or <i>via server</i>.</li>
+            <li><b>Everyone clicks Start Game.</b> Wait until all players see the game's menu.</li>
+            <li><b>Host the race.</b> The player shown as <i>Best host</i> goes to <b>Connect Players → Network IPX → Create Game</b>.
+              For two players choose <b>Peer-to-Peer</b>, for more <b>Client-Server</b>.</li>
+            <li><b>Join the race.</b> The others go to <b>Connect Players → Network IPX</b>, pick the game under <b>Games Available</b> and click <b>Join Game</b>.</li>
+            <li><b>Race.</b> The host picks the track and starts. The badge at the top left shows the room and each racer's ping. Click it to copy the invite link.</li>
+          </ol>
+          <dl class="specs">
+            <dt>Lag</dt><dd>The host's car reacts instantly; everyone else waits one round trip to the host. That's why the lowest-ping player should host.</dd>
+            <dt>Via server</dt><dd>If two browsers can't connect directly (strict routers), packets go through this server instead. It works, just a little slower.</dd>
+            <dt>Keep it visible</dt><dd>Leave every game window open while racing. A minimised tab can fall behind.</dd>
+            <dt>Names</dt><dd>The name inside the game's own lobby is the game's <i>Player 1 Name</i> setting. Change it there to match.</dd>
+          </dl>
         </div>
-        <ul id="members"></ul>
-        <p id="best-host" class="muted"></p>
-        <div id="share"><code id="share-link"></code><button id="copy-link" class="small secondary">Copy invite link</button></div>
-        <p class="howto">Everyone clicks <b>Start</b>. In the game: <b>Connect Players → Network IPX</b>. One player
-          (ideally the best host) picks <b>Create Game</b>; the others choose the game under <b>Games Available</b>
-          and click <b>Join Game</b>. For two players, <b>Peer-to-Peer</b> gives both players the same responsiveness.</p>
+      </section>
+
+      <section class="panel" id="about">
+        <div class="ph"><h2>Read Me</h2></div>
+        <div class="pb">
+          <p>This page runs <b>Need for Speed III: Hot Pursuit</b> (PC, modern patch) straight in your browser: the original
+            game code is recompiled from <i>your</i> copy, and the Voodoo2 graphics go through WebGL. Bring your own game:
+            pick the folder with <b>nfs3.exe</b>, <b>fedata</b> and <b>gamedata</b> once, and it is kept in this browser's private storage.</p>
+          <dl class="specs">
+            <dt>Browser</dt><dd>Chrome, Edge, Firefox or Safari with WebGL&nbsp;2</dd>
+            <dt>Controls</dt><dd>Keyboard like the original; click the picture to capture the mouse, Esc releases it</dd>
+            <dt>Online</dt><dd>Up to 8 racers per room, direct browser-to-browser links with relay fallback</dd>
+            <dt>Storage</dt><dd>About 400&nbsp;MB for the game files</dd>
+          </dl>
+        </div>
       </section>
     </div>
-    <div id="log"></div>
-  </section>
+  </div>
+
+  <div class="ticker" aria-hidden="true"><span>
+    <b>NEWS</b> &nbsp;·&nbsp; Online rooms are open: create one, share the link, race &nbsp;·&nbsp;
+    <b>TIP</b> &nbsp;·&nbsp; The best host gets zero input lag, so let the player with the lowest ping create the game &nbsp;·&nbsp;
+    <b>TIP</b> &nbsp;·&nbsp; Two players? Pick Peer-to-Peer in the host dialog &nbsp;·&nbsp;
+    <b>NEWS</b> &nbsp;·&nbsp; Voodoo2 graphics now run on your GPU through WebGL 2 &nbsp;·&nbsp;
+  </span></div>
+
+  <footer>
+    <div class="badges" aria-hidden="true">
+      <div class="badge b1">WebGL 2.0<br>Accelerated</div>
+      <div class="badge b2">Best viewed<br>1024×768</div>
+      <div class="badge b3">WASM<br>inside</div>
+      <div class="badge b4">Bring your<br>own game</div>
+    </div>
+    <div class="credits">
+      <div>Made by <a href="https://github.com/mrz944" target="_blank" rel="noopener">Marcin Zadka</a> ·
+        source on <a href="https://github.com/mrz944/nfs3-web" target="_blank" rel="noopener">GitHub</a></div>
+      <div>Fan-made runtime · not affiliated with Electronic Arts · no game files are hosted here</div>
+    </div>
+  </footer>
 </main>
+
 <div id="screen"><canvas id="canvas" width="640" height="480"></canvas></div>
 <div id="fps" hidden></div>
 <div id="netbadge" hidden title="Click to copy the room link"></div>
