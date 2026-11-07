@@ -1,41 +1,141 @@
 <!doctype html>
-<!-- Source of web/icons/og.png (1200x630 social preview). Render:
-     firefox --headless --no-remote --profile <tmp> --window-size=1200,630 --screenshot web/icons/og.png file://$PWD/docs/og-card.html -->
-<html><head><meta charset="utf-8"><style>
-  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #010622; font-family: Verdana, "DejaVu Sans", sans-serif; color: #eef2ff; }
-  .bg { position: absolute; inset: 0; background: radial-gradient(ellipse 75% 85% at 72% 50%, #2350e8 0%, #0e2fa8 28%, #061a72 52%, #030b3d 78%, #010622 100%); }
-  .ring { position: absolute; border-radius: 50%; left: 72%; top: 50%; transform: translate(-50%, -50%); }
-  .r1 { width: 1250px; height: 1250px; border: 95px solid rgba(30, 70, 220, .22); }
-  .r2 { width: 780px; height: 780px; border: 28px solid rgba(90, 140, 255, .15); }
-  .r3 { width: 430px; height: 430px; border: 10px solid rgba(160, 200, 255, .12); }
-  .stripes { position: absolute; right: 0; top: 0; bottom: 0; width: 260px; background: repeating-linear-gradient(0deg, rgba(150, 190, 255, .12) 0 2px, transparent 2px 9px);
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000); mask-image: linear-gradient(90deg, transparent, #000); }
-  .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .16) 0 1px, transparent 1px 3px); }
-  svg.arc { position: absolute; inset: 0; }
-  .orb { position: absolute; left: 70px; top: 70px; width: 150px; height: 150px; border-radius: 50%;
-    background: radial-gradient(circle at 36% 30%, #b9dcff 0 6%, #4b8dff 16%, #1442c8 42%, #061a6e 70%, #020a35 100%);
-    box-shadow: 0 0 0 8px #0a1c66, 0 0 0 11px #4d7cff, 0 0 0 17px #0a1c66, 0 0 40px 12px rgba(70, 130, 255, .55);
-    display: grid; place-items: center; font: italic 900 46px "Arial Black", "DejaVu Sans", sans-serif; color: #e1f0ff; text-shadow: 0 3px 0 #031047, 0 0 14px rgba(140, 190, 255, .9); letter-spacing: -2px; }
-  .txt { position: absolute; left: 70px; top: 262px; }
-  .kick { font: bold 22px Verdana, sans-serif; letter-spacing: .34em; text-transform: uppercase; color: #9fc0ff; }
-  h1 { margin: 6px 0 0; font: italic 900 96px/0.98 "Arial Black", "DejaVu Sans", sans-serif; text-transform: uppercase; letter-spacing: -1px;
-    background: linear-gradient(180deg, #fff6b0 0%, #ffd000 45%, #ff9900 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
-    filter: drop-shadow(4px 4px 0 #2a1400) drop-shadow(0 0 18px rgba(255, 190, 0, .35)); }
-  h1 span { display: block; font-size: 62px; color: transparent; }
-  .tags { margin-top: 30px; display: flex; gap: 14px; }
-  .tag { font: bold 21px Verdana, sans-serif; color: #fff; padding: 9px 30px 9px 20px; background: linear-gradient(180deg, #4459c0 0%, #24348c 45%, #141f63 100%);
-    border-radius: 22px 4px 4px 22px; clip-path: polygon(0 0, 100% 0, calc(100% - 16px) 100%, 0 100%); text-shadow: 0 1px 1px #000; }
-  .tag.go { background: linear-gradient(180deg, #ffe76a 0%, #ffc400 45%, #e88a00 100%); color: #1a0d00; text-shadow: none; }
+<!-- Source of web/icons/og.png (1200x630 social preview), in the site's own style: the backdrop
+     and the logo are drawn by the same code as web/index.html. Render:
+     chrome --headless=new --hide-scrollbars --window-size=1200,630 --virtual-time-budget=4000 \
+       --screenshot=web/icons/og.png file://$PWD/docs/og-card.html -->
+<html><head><meta charset="utf-8"><base href="../web/"><style>
+  @font-face { font-family: "Silkscreen"; font-weight: 400; src: url(fonts/silkscreen-latin-400-normal.woff2) format("woff2"); }
+  @font-face { font-family: "Silkscreen"; font-weight: 700; src: url(fonts/silkscreen-latin-700-normal.woff2) format("woff2"); }
+  @font-face { font-family: "Russo One"; font-weight: 400; src: url(fonts/russo-one-latin-400-normal.woff2) format("woff2"); }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #000418; color: #e8eeff; font-family: Verdana, "DejaVu Sans", sans-serif;
+    -webkit-font-smoothing: none; }
+  #bg { position: absolute; inset: 0; }
+  #bg canvas { position: absolute; inset: 0; width: 1200px; height: 630px; image-rendering: pixelated; }
+  #bg .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .14) 0 1px, transparent 1px 3px); }
+  #logo { position: absolute; left: 60px; top: 56px; image-rendering: pixelated; }
+  .txt { position: absolute; left: 72px; top: 296px; }
+  .kick { font: 700 32px/1 "Silkscreen", monospace; color: #ffd800; text-transform: uppercase; text-shadow: 3px 3px 0 #6a2c00, 6px 6px 0 #000820; font-style: italic; }
+  .line { margin-top: 18px; font: bold 30px/1.35 Verdana, "DejaVu Sans", sans-serif; color: #e8eeff; text-shadow: 2px 2px 0 #000a30; max-width: 760px; }
+  .tags { margin-top: 34px; display: flex; gap: 16px; }
+  .tag { font: 400 24px/1 "Silkscreen", monospace; color: #fff; text-transform: uppercase; padding: 12px 22px 12px 26px; text-shadow: 2px 2px 0 #000820;
+    clip-path: polygon(14px 0, 100% 0, 100% 100%, 14px 100%, 14px calc(100% - 2px), 8px calc(100% - 2px), 8px calc(100% - 4px), 6px calc(100% - 4px), 6px calc(100% - 6px),
+      4px calc(100% - 6px), 4px calc(100% - 8px), 2px calc(100% - 8px), 2px calc(100% - 14px), 0 calc(100% - 14px), 0 14px, 2px 14px, 2px 8px, 4px 8px, 4px 6px, 6px 6px, 6px 4px, 8px 4px, 8px 2px, 14px 2px);
+    background: linear-gradient(180deg, #5a74e0 0 3px, #3550c4 3px 12px, #2238a0 12px 24px, #172a80 24px 36px, #0e1c5c 36px); }
+  .tag.go { color: #1a0c00; text-shadow: 2px 2px 0 #fff6b0; background: linear-gradient(180deg, #fff8b0 0 3px, #ffe640 3px 12px, #ffcc00 12px 24px, #ffa800 24px 36px, #d87800 36px); }
+  .url { position: absolute; right: 60px; bottom: 44px; font: 700 28px/1 "Silkscreen", monospace; color: #8cc4ff; text-shadow: 3px 3px 0 #000820; }
 </style></head><body>
-  <div class="bg"></div><div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
-  <div class="stripes"></div>
-  <svg class="arc" viewBox="0 0 1200 630"><path d="M600 40 C 820 26, 1020 70, 1180 160" fill="none" stroke="#ffd000" stroke-width="7" stroke-linecap="round"/>
-    <path d="M640 600 C 860 560, 1040 520, 1200 440" fill="none" stroke="#ffd000" stroke-opacity=".5" stroke-width="4"/></svg>
-  <div class="orb">III</div>
+  <div id="bg" aria-hidden="true"><canvas id="bgc" width="400" height="210"></canvas><div class="scan"></div></div>
+  <canvas id="logo" width="360" height="90"></canvas>
   <div class="txt">
     <div class="kick">Play in your browser</div>
-    <h1>NFS3<span>Hot Pursuit</span></h1>
-    <div class="tags"><div class="tag go">No install</div><div class="tag">Online multiplayer</div><div class="tag">WebGL&nbsp;2</div></div>
+    <div class="line">The 1998 classic, recompiled for the web. Original handling, tracks and music.</div>
+    <div class="tags"><div class="tag go">No install</div><div class="tag">Online multiplayer</div><div class="tag">WebGL 2</div></div>
   </div>
-  <div class="scan"></div>
+  <div class="url">nfs3.xyz</div>
+<script>
+// Lo-fi look (see the comment at the top): the backdrop and the logo are drawn at low resolution
+// with an ordered (Bayer) dither to a small palette and shown scaled up with hard pixels.
+(() => {
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + .5) / 16);
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const RAMP = ['#000418', '#010a30', '#03124e', '#05196e', '#08218e', '#0c2cac', '#1438c4', '#1e48d8', '#3060e8', '#4c7cf4', '#7aa4ff', '#b0ccff'].map(hex);
+  const BLUES = [];                                                             // 34 shades: a gentle dither, not a blocky one
+  for (let i = 0; i < RAMP.length - 1; i++) for (let k = 0; k < 3; k++) BLUES.push(RAMP[i].map((v, c) => Math.round(v + (RAMP[i + 1][c] - v) * k / 3)));
+  BLUES.push(RAMP.at(-1));
+  const GOLD = ['#5a2400', '#a04800', '#e07800', '#ff9c00', '#ffc000', '#ffd800', '#fff080'].map(hex);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- backdrop: big rings around a glow, a rotating segmented ring, a gold arc, stripes
+  const bg = document.getElementById('bgc'), bx = bg.getContext('2d');
+  let W = 400, H = 210, img = null;
+  function size() {
+    H = 210;
+    if (bg.height !== H) { bg.width = W; bg.height = H; }
+    img = bx.createImageData(W, H);
+  }
+  function arcY(x) { const t = (x - .45 * W) / (.55 * W); return Math.min(W * .1, H * .16) + W * .16 * t * t; }   // sweeps down to the right, behind the header
+  function drawBg(t) {
+    const d = img.data, cx = .68 * W, cy = .46 * H, R = Math.max(W, H * 1.2);
+    const rot = reduce ? 0 : t * .00012;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const dx = (x - cx) / R, dy = (y - cy) / R * 1.1, r = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+      let v = Math.max(0, 1 - r / .62) ** 1.6 * .78 + .04;                      // glow
+      if (r > .47 && r < .60) v += .07 - Math.abs(r - .535) * .6;              // outer ring
+      if (r > .29 && r < .33) { const s = ((a + rot) / (Math.PI / 4) % 1 + 1) % 1; v += s < .3 ? .16 : .04; }  // segmented ring
+      if (r > .17 && r < .19) { const s = ((a - rot * 1.6) / (Math.PI / 2) % 1 + 1) % 1; v += s < .55 ? .1 : 0; }
+      if (x > W * .8 && y % 3 === 0) v += (x - W * .8) / (W * .2) * .08;       // right stripes
+      const k = BAYER[(y & 3) * 4 + (x & 3)];
+      const i = Math.max(0, Math.min(BLUES.length - 1, Math.floor(v * (BLUES.length - 1) + k - .5)));
+      const c = BLUES[i], o = (y * W + x) * 4;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+    }
+    if (W > H * 1.2) for (let x = Math.round(W * .45); x < W; x++) {           // gold arc (landscape only), fading in from the left
+      const y = Math.round(arcY(x)), f = (x - W * .45) / (W * .14);
+      for (let w = 0; w < 3; w++) {
+        if (y + w < 0 || y + w >= H || f < BAYER[((y + w) & 3) * 4 + (x & 3)]) continue;
+        const c = GOLD[w === 1 ? 5 : 3], o = ((y + w) * W + x) * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2];
+      }
+    }
+    bx.putImageData(img, 0, 0);
+  }
+  let last = 0;
+  function frame(t) {
+    const live = !document.hidden && !document.getElementById('bg').hidden;
+    if (live && t - last >= 83) { last = t; drawBg(t); }                      // 12 fps, like it's 1998
+    if (!reduce) requestAnimationFrame(frame);
+  }
+  size(); drawBg(0); requestAnimationFrame(frame);
+  addEventListener('resize', () => { size(); drawBg(performance.now()); });
+
+  // ---- logo: an orb with a chrome "III", chrome NEED FOR SPEED, gold HOT PURSUIT
+  const lg = document.getElementById('logo'), lx = lg.getContext('2d', { willReadFrequently: true });
+  const LW = lg.width, LH = lg.height, K = LW / 240;                         // laid out on a 240x60 grid
+  function chrome(y0, y1) {
+    const g = lx.createLinearGradient(0, y0, 0, y1);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(.42, '#a8d0ff'); g.addColorStop(.5, '#1c3a98'); g.addColorStop(.62, '#5a8cf0'); g.addColorStop(1, '#e4f2ff');
+    return g;
+  }
+  function gold(y0, y1) {
+    const g = lx.createLinearGradient(0, y0, 0, y1);
+    g.addColorStop(0, '#fff6a0'); g.addColorStop(.45, '#ffd800'); g.addColorStop(.75, '#ff9c00'); g.addColorStop(1, '#c05000');
+    return g;
+  }
+  function word(text, x, y, px, fill, font = 'Russo One') {
+    lx.save(); lx.translate(x, y); lx.transform(1, 0, -.22, 1, 0, 0);           // italic slant
+    lx.font = `${px}px "${font}", "Arial Black", Impact, sans-serif`; lx.textBaseline = 'alphabetic';
+    lx.lineJoin = 'round'; lx.lineWidth = 3; lx.strokeStyle = '#000a34'; lx.strokeText(text, 0, 0);
+    lx.fillStyle = fill; lx.fillText(text, 0, 0); lx.restore();
+  }
+  function drawLogo() {
+    lx.setTransform(1, 0, 0, 1, 0, 0); lx.clearRect(0, 0, LW, LH); lx.setTransform(K, 0, 0, K, 0, 0);
+    const ox = 29, oy = 30, or = 27;                                        // the orb
+    const sg = lx.createRadialGradient(ox - 9, oy - 10, 2, ox, oy, or);
+    sg.addColorStop(0, '#c0dcff'); sg.addColorStop(.25, '#4b8dff'); sg.addColorStop(.6, '#1442c8'); sg.addColorStop(1, '#041568');
+    lx.beginPath(); lx.arc(ox, oy, or + 3, 0, 7); lx.fillStyle = '#000a34'; lx.fill();
+    lx.beginPath(); lx.arc(ox, oy, or + 1, 0, 7); lx.fillStyle = '#4d7cff'; lx.fill();
+    lx.beginPath(); lx.arc(ox, oy, or - 1, 0, 7); lx.fillStyle = sg; lx.fill();
+    lx.beginPath(); lx.arc(ox, oy, or - 7, 3.6, 5.3); lx.strokeStyle = 'rgba(200,225,255,.55)'; lx.lineWidth = 2; lx.stroke();
+    word('III', ox - 15, oy + 9, 26, chrome(oy - 11, oy + 9));
+    word('NEED FOR SPEED', 64, 27, 18, chrome(13, 27));
+    word('HOT PURSUIT', 66, 46, 16, gold(34, 46));
+    lx.save(); lx.font = '8px Silkscreen, monospace'; lx.fillStyle = '#8cc4ff'; lx.fillText('WEB RUNTIME · ONLINE', 69, 57); lx.restore();
+    lx.setTransform(1, 0, 0, 1, 0, 0);
+    const id = lx.getImageData(0, 0, LW, LH), d = id.data;                     // hard edges, 8 levels per channel, dithered
+    for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++) {
+      const o = (y * LW + x) * 4, k = BAYER[(y & 3) * 4 + (x & 3)];
+      if (d[o + 3] < 110) { d[o + 3] = 0; continue; }
+      const a = d[o + 3] / 255;
+      for (let c = 0; c < 3; c++) { const v = d[o + c] / 255 * a; d[o + c] = Math.min(7, Math.floor(v * 7 + k)) * 255 / 7; }
+      d[o + 3] = 255;
+    }
+    lx.putImageData(id, 0, 0);
+  }
+  function fitLogo() {
+    lg.style.width = LW * 2 + 'px';
+  }
+  fitLogo(); drawLogo(); addEventListener('resize', fitLogo);
+  Promise.all(['18px "Russo One"', '8px Silkscreen'].map((f) => document.fonts.load(f))).then(drawLogo, () => {});
+})();
+</script>
 </body></html>

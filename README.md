@@ -226,7 +226,7 @@ bugs much easier to chase than in a browser.
 
 - ✅ Menus, car showcase, single races, Hot Pursuit, GPU rendering, sound, keyboard and mouse
 - ✅ Online: lobby, rooms with passwords, 2-player races tested across browsers
-- 🚧 Next: rollback (prediction) netcode so clients have no input lag either; the lobby name as the in-game name; wider browser testing
+- 🚧 Next: rollback (prediction) netcode so clients have no input lag either; wider browser testing
 
 ## Credits
 
@@ -236,6 +236,7 @@ Made by **[Marcin Zadka](https://github.com/mrz944)**.
 - [NFS3 Modern Patch](https://veg.by/en/projects/nfs3/) by VEG is the patched game this project runs.
 - [OpenNFS](https://github.com/OpenNFS/OpenNFS) was a reference for the game's data formats.
 - [Capstone](https://www.capstone-engine.org/) and [Emscripten](https://emscripten.org/) make this possible.
+- Site fonts: [Silkscreen](https://github.com/googlefonts/silkscreen) and [Russo One](https://fonts.google.com/specimen/Russo+One), both under the SIL Open Font License (`web/fonts/`).
 
 *Need for Speed* and *Hot Pursuit* are trademarks of Electronic Arts. This is an unofficial fan
 project, not affiliated with or endorsed by EA. Generated builds and game assets remain
