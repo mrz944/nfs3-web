@@ -94,6 +94,7 @@ static void frame_append(GFrame *d, GFrame *s) {
 void gpu_publish(GFrame *f) {
     g_gpu_active = 1;
     { extern void net_frame(void); net_frame(); }   /* online: car states in and out (net.c) */
+    { extern void game_frame(void); game_frame(); } /* game tweaks: everything unlocked (game.c) */
     extern void gpu_headless_frame(GFrame *f);
     pthread_mutex_lock(&fq_mu);
     f->seq = ++frame_seq;

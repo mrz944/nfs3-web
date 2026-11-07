@@ -49,6 +49,11 @@ NFS3 Web is **not a remake and not a re-tuned version**. The game you drive is t
 200 bug fixes. The game folder on the server needs the Modern Patch installed (the English
 base is what's been tested).
 
+**Unlocked from the start.** The bonus cars (El Niño, Mercedes CLK GTR, Jaguar XJR-15, the
+Pursuit Lamborghini Diablo SV and Pursuit El Niño) and the bonus track Empire City are there
+from the first race, set in the game's own "awarded" flags (`runtime/game.c`; `RT_LOCKED=1`
+keeps the original locks). Gamepads and wheels work as DirectInput joysticks.
+
 **Our runtime fixes.** A few things the game expects from Windows had to be emulated precisely
 before it ran correctly, for example:
 - the `NUL` device that the car screen opens;
