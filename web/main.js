@@ -153,7 +153,7 @@ async function importPack(base) {
           while (left > 0) {
             if (!buf.length) await pull();
             const n = Math.min(left, buf.length), part = buf.subarray(0, n);
-            if (isIni) ini.push(part.slice()); else await w.write(part);
+            if (isIni) ini.push(part.slice()); else await w.write(exact(part));
             buf = buf.subarray(n); left -= n;
           }
           if (isIni) await w.write(patchIni(new TextDecoder('latin1').decode(concat(...ini))));
@@ -174,6 +174,37 @@ async function importPack(base) {
   log(`game pack ${idx.id}: ${(fresh / MB).toFixed(0)} MB in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   await writeText(dir, '.download-complete', 'complete');
   $('progress').hidden = true;
+}
+// Safari's FileSystemWritableFileStream.write() writes the whole ArrayBuffer behind a typed array,
+// ignoring a subarray's offset and length, so only ever hand it arrays that cover their buffer.
+const exact = (u) => (u.byteOffset === 0 && u.byteLength === u.buffer.byteLength ? u : u.slice());
+// Downloads made by Safari before that fix have files of the wrong size: compare every file with
+// the pack index once per pack, and download again if any is off (files the page or the game
+// rewrites, nfs3.ini and text.eng, are left out).
+async function checkPack() {
+  try {
+    if (!(await hasGame())) return;
+    const d = await gameDir(), id = await readText(d, '.pack-id');
+    if (!id || (await readText(d, '.pack-checked')) === id) return;
+    const base = await packSource();
+    if (!base) return;
+    const idx = await (await fetch(base + 'index.json')).json();
+    if (idx.id !== id) return;
+    let bad = 0, first = '';
+    for (const c of idx.chunks) for (const [path, size] of c.files) {
+      if (/^(nfs3\.ini|fedata\/text\/text\.eng)$/i.test(path)) continue;
+      const parts = path.split('/');
+      let ok = false;
+      try { let h = d; for (const p of parts.slice(0, -1)) h = await h.getDirectoryHandle(p); ok = (await (await h.getFileHandle(parts.at(-1))).getFile()).size === size; } catch {}
+      if (!ok) { bad++; first ||= path; }
+    }
+    if (bad) {
+      log(`game files: ${bad} damaged (first: ${first}), downloading them again`);
+      track('error', { kind: 'damaged', msg: `${bad} files` });
+      for (const f of ['.download-complete', '.pack-done']) await d.removeEntry(f).catch(() => {});
+      await d.getDirectoryHandle('fedata').then((f) => f.getDirectoryHandle('text')).then((t) => t.removeEntry('text.eng.orig')).catch(() => {});
+    } else await writeText(d, '.pack-checked', id);
+  } catch (e) { log('game files check failed:', e.message); }
 }
 function concat(...parts) {
   const out = new Uint8Array(parts.reduce((s, p) => s + p.length, 0));
@@ -227,7 +258,7 @@ async function writeGameName(name) {
   log(`name: the game will call you "${name}"`);
 }
 async function fileBytes(dir, name) { try { return new Uint8Array(await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer()); } catch { return null; } }
-async function writeBytes(dir, name, bytes) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(bytes); await w.close(); }
+async function writeBytes(dir, name, bytes) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(exact(bytes)); await w.close(); }
 
 // the browser build renders through the Voodoo2 (Glide) driver -> WebGL2
 const patchIni = (t) => t.replace(/^ThrashDriver\s*=.*$/mi, 'ThrashDriver=glide3x');
@@ -845,6 +876,7 @@ async function init() {
   // a server started with --game offers its game folder: import it automatically
   // ?devimport also forces the attempt and reports errors
   const forced = new URLSearchParams(location.search).has('devimport');
+  await checkPack();
   if (await hasGame()) mark('files');
   const pack = await hasGame() ? null : await packSource();
   if (pack) {
