@@ -11,6 +11,38 @@ uint8_t *G;
 int rt_verbose = 1;
 __thread CPU *tls_cpu;
 __thread const char *tls_thunk_name;
+/* watchdog (rt_watch_*): what every guest thread is doing, readable from another thread */
+static __thread volatile uint32_t tls_calls, tls_ret;
+static __thread const char *volatile tls_last;
+typedef struct { uint32_t tid; CPU *const volatile *cpu; const char *const volatile *in; const char *const volatile *last; volatile uint32_t *calls, *ret; uint32_t seen; } Watch;
+static Watch watch[64]; static int nwatch;
+uint32_t rt_caller(void) { return tls_ret; }   /* guest address of the current API call */
+void guest_backtrace(CPU *c);
+void rt_watch_thread(uint32_t tid) {
+    int i = __atomic_fetch_add(&nwatch, 1, __ATOMIC_SEQ_CST);
+    if (i < 64) watch[i] = (Watch){ tid, (CPU *const volatile *)&tls_cpu, (const char *const volatile *)&tls_thunk_name, &tls_last, &tls_calls, &tls_ret, 0 };
+}
+void rt_watch_dump(const char *why) {
+    extern void ev_dump(void); ev_dump();
+    for (const char *pk = getenv("RT_WATCH_PEEK"); pk && *pk; ) {   /* hexaddr:len,... */
+        unsigned pa = 0, pl = 16; int used = 0;
+        if (sscanf(pk, "%x:%u%n", &pa, &pl, &used) < 2 || !used) break;
+        if (pl > 64) pl = 64;
+        char h[256]; int k = 0;
+        for (unsigned i = 0; i < pl; i++) k += snprintf(h + k, sizeof h - k, "%02x%s", G[pa + i], (i & 3) == 3 ? " " : "");
+        rt_log("  [%#x] %s", pa, h);
+        pk += used; if (*pk == ',') pk++;
+    }
+    rt_log("threads (%s):", why);
+    int n = nwatch < 64 ? nwatch : 64;
+    for (int i = 0; i < n; i++) {
+        Watch *w = &watch[i];
+        uint32_t calls = *w->calls, d = calls - w->seen; w->seen = calls;
+        const char *in = *w->in, *last = *w->last;
+        rt_log("  thread %#x: %s %s, from %#x, %u calls since last look", w->tid, in ? "in" : "running guest code, last call", in ? in : last ? last : "-", *w->ret, d);
+        if (*w->cpu) guest_backtrace(*w->cpu);
+    }
+}
 __thread uint32_t tls_lasterr;
 char g_game_dir[1024];
 
@@ -142,8 +174,9 @@ void call_indirect(CPU *c, uint32_t t) {
         for (int i = 0; i < n && i < 16; i++) args[i] = RD32(c->r[ESP] + 4 + 4 * i);
         if (rt_verbose > 1) rt_log("call %s", th->name);
         const char *prev = tls_thunk_name; tls_thunk_name = th->name;
+        uint32_t prev_ret = tls_ret; tls_ret = RD32(c->r[ESP]); tls_last = th->name; tls_calls++;
         uint32_t ret = th->fn(c, args);
-        tls_thunk_name = prev;
+        tls_thunk_name = prev; tls_ret = prev_ret;
         c->r[EAX] = ret;
         c->r[ESP] += 4 + (th->nargs > 0 ? 4 * th->nargs : 0);
         return;
@@ -485,6 +518,8 @@ static void *game_thread(void *unused) {
     CPU *c = calloc(1, sizeof *c);
     cpu_init(c, STACK_MAIN_TOP);
     tls_cpu = c;
+    rt_watch_thread(0);
+    { extern void gpu_start_watchdog(void); gpu_start_watchdog(); }
     PUSH32(RET_SENTINEL);
     rt_log("entering guest entry point %#x", g_entry_point);
     call_indirect(c, g_entry_point);

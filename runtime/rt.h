@@ -49,6 +49,9 @@ CPU *cpu_new_thread(uint32_t stack_size);
 void guest_backtrace(CPU *c);  /* fresh CPU with stack + TEB */
 extern __thread CPU *tls_cpu;
 extern __thread const char *tls_thunk_name;  /* host function currently executing */
+void rt_watch_thread(uint32_t tid);   /* register the calling guest thread with the watchdog */
+void rt_watch_dump(const char *why);
+uint32_t rt_caller(void);              /* guest return address of the API call in progress */   /* log what every guest thread is doing */
 
 /* ---- import table ---- */
 typedef struct { const char *dll, *name; int nargs; hostfn fn; } ImportDef;

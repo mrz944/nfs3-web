@@ -253,6 +253,7 @@ static void *timer_main(void *unused) {
     (void)unused;
     CPU *tc = cpu_new_thread(0x40000);
     tls_cpu = tc;
+    rt_watch_thread(0xfff0);                 /* shows as the multimedia timer thread */
     pthread_mutex_lock(&timer_mu);
     for (;;) {
         int k = -1;

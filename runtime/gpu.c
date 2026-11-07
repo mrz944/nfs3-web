@@ -41,6 +41,21 @@ static pthread_mutex_t fq_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t fq_cv = PTHREAD_COND_INITIALIZER;
 static GFrame *pending;                 /* newest complete frame not yet taken by the renderer */
 static uint32_t frame_seq;
+/* the game's frames stop for 5 s: log what every thread is doing (then every 10 s while it lasts) */
+static void *stall_watch(void *unused) {
+    (void)unused;
+    uint32_t seen = 0; int quiet = 0, next = 5, secs = 0;
+    const char *at = getenv("RT_WATCH_AT");                  /* debugging: also dump at this second */
+    for (;;) {
+        nanosleep(&(struct timespec){ 1, 0 }, NULL);
+        if (at && ++secs == atoi(at)) rt_watch_dump("requested");
+        uint32_t f = __atomic_load_n(&frame_seq, __ATOMIC_RELAXED);
+        if (f != seen) { seen = f; quiet = 0; next = 5; continue; }
+        if (++quiet == next) { char why[48]; snprintf(why, sizeof why, "no frame for %d s after frame %u", quiet, f); rt_watch_dump(why); next += 10; }
+    }
+    return NULL;
+}
+void gpu_start_watchdog(void) { static int on; if (!on) { on = 1; pthread_t t; pthread_create(&t, NULL, stall_watch, NULL); } }
 static volatile double renderer_seen;   /* last time the renderer ran (seconds) */
 volatile double gpu_renderer_seen_reset; /* headless test renderer: don't pace the game to it */
 static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + t.tv_nsec * 1e-9; }

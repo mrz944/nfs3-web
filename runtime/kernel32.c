@@ -284,6 +284,23 @@ typedef struct {
     int is_thread;
     uint32_t pulse_gen;          /* bumped by PulseEvent so pollers can't miss it */
 } Waitable;
+static int evlog = -1;   /* RT_EVLOG=1: log event traffic as it happens; 2: keep it in a ring, printed by the watchdog */
+typedef struct { uint64_t t; const char *what; uint32_t h, from, x; pthread_t th; } EvRec;
+static EvRec evring[1 << 14]; static uint32_t evn;
+static void ev(const char *what, uint32_t h, uint32_t x) {
+    if (evlog < 0) { const char *e = getenv("RT_EVLOG"); evlog = e ? atoi(e) : 0; }
+    if (!evlog) return;
+    if (evlog == 1) { rt_log("ev %s %#x (%u) from %#x", what, h, x, rt_caller()); return; }
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint32_t i = __atomic_fetch_add(&evn, 1, __ATOMIC_RELAXED) & 0x3fff;
+    evring[i] = (EvRec){ (uint64_t)ts.tv_sec * 1000000000ull + ts.tv_nsec, what, h, rt_caller(), x, pthread_self() };
+}
+void ev_dump(void) {
+    if (evlog != 2) return;
+    uint32_t n = evn, k = n > 0x4000 ? n - 0x4000 : 0;
+    rt_log("last %u events:", n - k);
+    for (; k < n; k++) { EvRec *r = &evring[k & 0x3fff]; rt_log("  %10.3f th=%lx %s %#x (%u) from %#x", r->t / 1e9, (unsigned long)r->th, r->what, r->h, r->x, r->from); }
+}
 static Waitable *waitable_new(void) {
     Waitable *w = calloc(1, sizeof *w);
     pthread_mutex_init(&w->mu, NULL); pthread_cond_init(&w->cv, NULL);
@@ -296,6 +313,7 @@ static Waitable *get_waitable(uint32_t h) {
 }
 static uint32_t k_CloseHandle(CPU *c, const uint32_t *a) {
     int t = handle_type(A(0));
+    if (t == H_EVENT || t == H_MUTEX) ev("close", A(0), (uint32_t)t);
     if (t == H_FILE) { File *f = handle_get(A(0), H_FILE); close(f->fd); free(f); }
     if (t != H_THREAD && t != H_NONE) handle_close(A(0));
     return 1;
@@ -336,13 +354,14 @@ static uint32_t k_WaitForSingleObject(CPU *c, const uint32_t *a) {
 static uint32_t k_WaitForMultipleObjectsEx(CPU *c, const uint32_t *a) {
     uint32_t n = A(0), arr = A(1), all = A(2), ms = A(3);
     struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
+    if (ms == INFINITE) ev(all ? "waitall" : "wait", RD32(arr), n);
     uint32_t gens[64];
     for (uint32_t i = 0; i < n && i < 64; i++) { Waitable *w = get_waitable(RD32(arr + 4 * i)); gens[i] = w ? w->pulse_gen : 0; }
     for (;;) {
         if (!all) {
             for (uint32_t i = 0; i < n; i++) {
                 Waitable *w = get_waitable(RD32(arr + 4 * i));
-                if (w && wait_one_gen(w, 0, gens[i])) return WAIT_OBJECT_0 + i;
+                if (w && wait_one_gen(w, 0, gens[i])) { if (ms == INFINITE) ev("woke", RD32(arr + 4 * i), i); return WAIT_OBJECT_0 + i; }
             }
         } else {
             /* bWaitAll: only take (reset) the objects once every one of them is ready,
@@ -369,9 +388,12 @@ static uint32_t k_WaitForMultipleObjectsEx(CPU *c, const uint32_t *a) {
 }
 static uint32_t k_CreateEventA(CPU *c, const uint32_t *a) {
     Waitable *w = waitable_new(); w->manual = A(1) != 0; w->signaled = A(2) != 0;
-    return handle_new(H_EVENT, w);
+    uint32_t h = handle_new(H_EVENT, w);
+    ev(w->manual ? "create manual" : "create auto", h, (uint32_t)w->signaled);
+    return h;
 }
 static uint32_t set_event(uint32_t h, int sig, int pulse) {
+    ev(pulse ? "pulse" : sig ? "set" : "reset", h, 0);
     Waitable *w = handle_get(h, H_EVENT); if (!w) return 0;
     pthread_mutex_lock(&w->mu);
     w->signaled = sig;
@@ -431,6 +453,8 @@ static void *thread_main(void *p) {
     pthread_mutex_unlock(&t->smu);
     CPU *c = cpu_new_thread(t->stack ? t->stack : 0x100000);
     tls_cpu = c;
+    rt_watch_thread(t->tid);
+    ev("thread start", t->tid, t->param);
     uint32_t r = guest_call(c, t->start, 1, t->param);
     rt_log("thread %#x exited (%u)", t->tid, r);
     pthread_mutex_lock(&t->w.mu); t->w.signaled = 1; pthread_cond_broadcast(&t->w.cv); pthread_mutex_unlock(&t->w.mu);
