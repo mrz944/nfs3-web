@@ -424,7 +424,100 @@ function attachInput(mod, canvas) {
   canvas.addEventListener('mouseup', (ev) => { if (document.pointerLockElement === canvas) push(3, ev.button === 2 ? 3 : 1, 0); });
   canvas.addEventListener('wheel', (ev) => { push(4, ev.deltaY < 0 ? 120 : -120, 0); ev.preventDefault(); }, { passive: false });
   canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  return (code, down) => { const idx = keyIndex[code]; if (idx !== undefined && idx >= 0) push(1, idx, down ? 1 : 0); };
 }
+
+// ------------------------------------------------------------------- controllers
+// Gamepads and wheels reach the game as DirectInput joysticks (runtime/dinput.c): every frame
+// each one's state goes into the runtime, 8 axes in DIJOYSTATE order (X Y Z Rx Ry Rz slider
+// slider, -1..1), 32 buttons and the hat. So the game's default joystick setup (steer on X, gas
+// and brake on Y) drives at once:
+//   standard pads: X = left stick, Y = brake - gas (the triggers; else the stick), Z = gas,
+//     Rz = brake (to map them apart), Rx/Ry = right stick; Start pauses, the d-pad also works menus
+//   wheels: X = the wheel; pedals (axes resting at an end) go 0..1 from rest, the first two also
+//     as Y (brake - gas) and alone as Z / Rz; the rest pass through.
+// The game only takes the controllers it found at start, and the browser only shows one after a
+// button press: the start page asks for a press and says what it found.
+const PAD_BYTES = 116;
+const padRest = new Map();          // gamepad id -> axis values when first seen (pedal detection)
+function padList() {
+  let all = [];
+  try { all = [...(navigator.getGamepads?.() || [])].filter((p) => p && p.connected); } catch {}
+  return all.sort((a, b) => isWheel(b) - isWheel(a));      // a wheel is controller 1
+}
+const isWheel = (p) => /wheel|racing|driving force|g2[579]\b|g9[02]\b|g923|t150|t248|t300|tmx|t-gt|fanatec|thrustmaster|momo/i.test(p.id);
+const padName = (p) => p.id.replace(/\(.*?\)/g, '').replace(/standard gamepad/i, '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'Controller';
+const clamp1 = (v) => (v < -1 ? -1 : v > 1 ? 1 : v);
+function padState(p) {
+  const ax = (i) => p.axes[i] || 0;
+  const bv = (i) => (p.buttons[i] ? (typeof p.buttons[i].value === 'number' ? p.buttons[i].value : p.buttons[i].pressed ? 1 : 0) : 0);
+  const axes = new Float32Array(8);
+  let buttons = 0, pov = -1;
+  const hat = (u, r, d, l) => { const x = r - l, y = d - u; if (!x && !y) return -1; return Math.round(((Math.atan2(x, -y) * 18000 / Math.PI) + 36000) % 36000); };
+  if (p.mapping === 'standard') {
+    const gas = bv(7), brake = bv(6);
+    axes[0] = ax(0); axes[1] = clamp1(ax(1) + brake - gas); axes[2] = gas; axes[3] = ax(2); axes[4] = ax(3); axes[5] = brake;
+    [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 6, 7, 12, 13, 14, 15, 16].forEach((src, i) => { if (bv(src) > 0.5) buttons |= 1 << i; });
+    pov = hat(bv(12) > 0.5, bv(15) > 0.5, bv(13) > 0.5, bv(14) > 0.5);
+    return { wheel: false, axes, buttons, pov };
+  }
+  if (!padRest.has(p.id)) padRest.set(p.id, Array.from(p.axes));
+  const rest = padRest.get(p.id), pedals = [], other = [];
+  for (let i = 1; i < p.axes.length && i < 16; i++) {
+    if (i === 9 && p.axes.length > 9) continue;                   // the hat, on most wheels (below)
+    (Math.abs(rest[i] || 0) > 0.9 ? pedals : other).push(i);
+  }
+  const pedal = (i) => (i === undefined ? 0 : Math.max(0, Math.min(1, (rest[i] - ax(i)) * Math.sign(rest[i]) / 2)));
+  axes[0] = ax(0);
+  axes[1] = clamp1(pedal(pedals[1]) - pedal(pedals[0]));
+  axes[2] = pedal(pedals[0]); axes[5] = pedal(pedals[1]);
+  axes[3] = other[0] !== undefined ? ax(other[0]) : 0; axes[4] = other[1] !== undefined ? ax(other[1]) : 0;
+  axes[6] = pedal(pedals[2]); axes[7] = other[2] !== undefined ? ax(other[2]) : 0;
+  for (let i = 0; i < 32 && i < p.buttons.length; i++) if (bv(i) > 0.5) buttons |= 1 << i;
+  if (p.axes.length > 9 && ax(9) >= -1.01 && ax(9) <= 1.01) pov = Math.round((ax(9) + 1) / 2 * 7) * 4500;   // -1 up .. 1 up-left, ~1.29 centred
+  return { wheel: isWheel(p), axes, buttons, pov };
+}
+let padSeq = 0;
+const padPrev = { start: false, arrows: [false, false, false, false] };
+function writePads(mod, key) {
+  const base = mod._rt_web_pads?.(); if (!base) return;
+  const dv = new DataView(mod.HEAPU8.buffer), pads = padList();
+  padSeq++;
+  for (let k = 0; k < 2; k++) {
+    const o = base + k * PAD_BYTES, p = pads[k];
+    dv.setUint32(o, padSeq, true);
+    if (!p) { dv.setUint32(o + 4, 0, true); continue; }
+    const s = padState(p);
+    dv.setUint32(o + 4, 1, true); dv.setUint32(o + 8, s.wheel ? 1 : 0, true);
+    for (let i = 0; i < 8; i++) dv.setFloat32(o + 12 + 4 * i, s.axes[i], true);
+    dv.setUint32(o + 44, s.buttons >>> 0, true); dv.setInt32(o + 48, s.pov, true);
+    const name = new TextEncoder().encode(padName(p).replace(/[^\x20-\x7e]/g, '')).slice(0, 63);
+    mod.HEAPU8.set(name, o + 52); mod.HEAPU8[o + 52 + name.length] = 0;
+    if (k === 0 && key && p.mapping === 'standard') {              // Start pauses; the d-pad works the menus
+      const start = !!p.buttons[9]?.pressed;
+      if (start !== padPrev.start) { key('Escape', start); padPrev.start = start; }
+      ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].forEach((c, i) => {
+        const d = !!p.buttons[12 + i]?.pressed;
+        if (d !== padPrev.arrows[i]) { key(c, d); padPrev.arrows[i] = d; }
+      });
+    }
+  }
+}
+// start page: say which controller the game will get (or how to make it show up)
+function watchPads() {
+  const el = $('pad'); if (!el || !navigator.getGamepads) return;
+  const show = () => {
+    const pads = padList();
+    if (gameStarted && pads.length && !padsAtStart) { el.textContent = `${padName(pads[0])} connected: reload the page to drive with it.`; return; }
+    if (gameStarted) return;
+    el.textContent = pads.length ? `Controller: ${pads.map(padName).join(', ')}. Set it up in Options › Controllers.` : 'Controller or wheel? Press any button on it before Start.';
+  };
+  window.addEventListener('gamepadconnected', (e) => { log(`controller connected: ${e.gamepad.id} (${e.gamepad.mapping || 'raw'} mapping, ${e.gamepad.axes.length} axes, ${e.gamepad.buttons.length} buttons)`); show();
+    if (gameStarted && !padsAtStart) { $('hint').textContent = 'Controller connected: reload the page to drive with it (the game looks for controllers at start)'; $('hint').hidden = false; } });
+  window.addEventListener('gamepaddisconnected', show);
+  show();
+}
+let padsAtStart = 0;
 
 // ------------------------------------------------------------------- audio
 // The AudioContext is made inside the Start click (Safari only lets audio start during the
@@ -488,6 +581,8 @@ const mark = (k) => { if (phase[k] == null) phase[k] = Math.round(performance.no
 async function start() {
   $('start').disabled = true;
   mark('click');
+  padsAtStart = padList().length;
+  if (padsAtStart) log(`controllers for the game: ${padList().map((p) => `${padName(p)} (${p.mapping || 'raw'}${isWheel(p) ? ', wheel' : ''})`).join(', ')}`);
   status('Loading the recompiled game…');
   await ensureIni();
   await writeGameName($('pname')?.value);
@@ -512,6 +607,8 @@ async function start() {
     },
     // the screen in pixels, landscape: the game offers the resolutions that fit (glide.c)
     arguments: ['/opfs/nfs3', `RT_SCREEN=${screenPixels()}`],
+    // controllers before the game looks for them (it does once, right at start)
+    preRun: [(m) => { try { writePads(m); } catch {} }],
     print: (t) => console.log(t),
     printErr: (t) => console.log(t),
   });
@@ -534,7 +631,8 @@ async function start() {
   const cover = $('loading'), badge = $('loadbadge');
   cover.hidden = false;
   const canvas = $('canvas');
-  attachInput(mod, canvas);
+  const key = attachInput(mod, canvas);
+  setInterval(() => writePads(mod, key), 8);                      // ~120 Hz, also with the tab in the background
   startAudio(mod).catch((e) => log('audio unavailable:', e.message || e));
 
   let fpsN = 0, fpsT = performance.now(), first = true, stalled = false, lastFresh = performance.now();
@@ -899,6 +997,7 @@ async function init() {
   $('tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
   setupOnline();
   setupActivity();
+  watchPads();
   log('page loaded; crossOriginIsolated =', crossOriginIsolated, '; SharedArrayBuffer =', typeof SharedArrayBuffer);
   if (!crossOriginIsolated) {
     status('This page must be served with cross-origin isolation (COOP/COEP headers). Use web/serve.mjs.', true);
