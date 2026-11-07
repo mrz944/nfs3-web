@@ -93,6 +93,7 @@ static void frame_append(GFrame *d, GFrame *s) {
 
 void gpu_publish(GFrame *f) {
     g_gpu_active = 1;
+    { extern void net_frame(void); net_frame(); }   /* online: car states in and out (net.c) */
     extern void gpu_headless_frame(GFrame *f);
     pthread_mutex_lock(&fq_mu);
     f->seq = ++frame_seq;
@@ -129,6 +130,30 @@ void gpu_publish(GFrame *f) {
         frame_append(pending, f); old = f; pending->seq = f->seq;
     } else { if (pending) st_replaced++; old = pending; pending = f; }
     st_published++;
+    {   /* RT_MEMDUMP=start_s:count:every_n_frames: guest memory snapshots at frame boundaries (debugging) */
+        static int md = -1, left, every, k; static double start;
+        if (md < 0) { const char *e = getenv("RT_MEMDUMP"); md = e != NULL; if (e) { left = 4; every = 6; sscanf(e, "%lf:%d:%d", &start, &left, &every); } }
+        static double t0; if (!t0) t0 = now_s();
+        if (md && left > 0 && now_s() - t0 >= start && k++ % every == 0) {
+            extern uint32_t heap_used(void);
+            char fn[64]; snprintf(fn, sizeof fn, "build/mem/m%02d.bin", left--);
+            FILE *o = fopen(fn, "wb");
+            if (o) { fwrite(G + 0x400000, 1, HEAP_LO - 0x400000 + heap_used(), o); fclose(o); rt_log("memdump %s at frame %u", fn, f->seq); }
+        }
+    }
+    {   /* RT_CARLOG=1: every second, each car's position and speed (debugging the online sync) */
+        static int cl = -1; static double last;
+        if (cl < 0) cl = getenv("RT_CARLOG") ? atoi(getenv("RT_CARLOG")) : 0;   /* ms between lines */
+        if (cl > 0 && now_s() - last >= cl / 1000.0) {
+            last = now_s(); char b[512]; int k = 0;
+            for (int i = 0; i < 8; i++) {
+                uint32_t car = RD32(0x5efac8u + 4 * i); if (car < 0x400000 || car >= GUEST_SIZE) continue;
+                float p[3], v, w[3]; memcpy(p, G + car + 0x98, 12); memcpy(&v, G + car + 0xb8, 4); memcpy(w, G + car + 0xd8, 12); w[1] = atan2f(w[0], w[2]);   /* heading from the forward row */
+                k += snprintf(b + k, sizeof b - k, " %d:(%.2f,%.2f,%.2f %.1f w%.4f)", i, p[0], p[1], p[2], v, w[1]);
+            }
+            rt_log("cars%s", b);
+        }
+    }
     static int fps_log = -1; if (fps_log < 0) fps_log = getenv("RT_FPS_LOG") != NULL;
     if (fps_log) {                              /* testing: frames published per second */
         static double t0; static uint64_t n0; double t = now_s();

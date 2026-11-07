@@ -68,21 +68,218 @@ static double tnow(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t)
 static void trace_pkt(const char *dir, const uint8_t node[6], uint16_t dport, uint16_t sport, const uint8_t *d, int n) {
     if (net_trace < 0) net_trace = getenv("RT_NET_TRACE") != NULL;
     if (!net_trace) return;
-    char h[100]; int k = 0;
-    for (int i = 0; i < n && i < 24; i++) k += snprintf(h + k, sizeof h - k, "%02x", d[i]);
+    char h[600]; int k = 0;
+    for (int i = 0; i < n && i < 256; i++) k += snprintf(h + k, sizeof h - k, "%02x", d[i]);
     rt_log("pkt %.3f %s %02x%02x %04x->%04x %4d %s", fmod(tnow(), 1000.0), dir, node[4], node[5], sport, dport, n, h);
 }
 
 /* --------------------------------------------------------------- transport */
 static void transport_send(const uint8_t dst[6], const uint8_t *pkt, int len);
 
+static void deliver_now(const uint8_t src[6], const uint8_t *p, int len);
+/* RT_NET_DELAY=ms: hold incoming packets that long (testing a link's latency natively) */
+#define DQ 1024
+static struct { double due; uint8_t src[6]; uint16_t len; uint8_t p[MAXPKT + 4]; } dq[DQ];
+static unsigned dq_h, dq_t; static double net_delay = -1;
+static pthread_mutex_t dq_mu = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t dq_cv = PTHREAD_COND_INITIALIZER;
+static void *delay_main(void *unused) {
+    (void)unused;
+    pthread_mutex_lock(&dq_mu);
+    for (;;) {
+        while (dq_h == dq_t) pthread_cond_wait(&dq_cv, &dq_mu);
+        double w = dq[dq_t].due - tnow();
+        if (w > 0) { pthread_mutex_unlock(&dq_mu); usleep((useconds_t)(w * 1e6)); pthread_mutex_lock(&dq_mu); continue; }
+        uint8_t src[6], p[MAXPKT + 4]; int len = dq[dq_t].len;
+        memcpy(src, dq[dq_t].src, 6); memcpy(p, dq[dq_t].p, (size_t)len); dq_t = (dq_t + 1) % DQ;
+        pthread_mutex_unlock(&dq_mu); deliver_now(src, p, len); pthread_mutex_lock(&dq_mu);
+    }
+    return NULL;
+}
 /* a packet from the network (any thread) */
 void net_deliver(const uint8_t src[6], const uint8_t *p, int len) {
     if (len < 4) return;
     static double loss = -1;            /* RT_NET_LOSS=percent: drop incoming packets (testing) */
     if (loss < 0) { const char *e = getenv("RT_NET_LOSS"); loss = e ? atof(e) / 100.0 : 0; }
     if (loss > 0 && (double)rand() / RAND_MAX < loss) { stats.drop++; return; }
+    if (net_delay < 0) {
+        const char *e = getenv("RT_NET_DELAY"); net_delay = e ? atof(e) / 1000.0 : 0;
+        if (net_delay > 0) { pthread_t t; pthread_create(&t, NULL, delay_main, NULL); }
+    }
+    if (net_delay > 0 && len <= MAXPKT + 4) {
+        pthread_mutex_lock(&dq_mu);
+        if ((dq_h + 1) % DQ != dq_t) {
+            dq[dq_h].due = tnow() + net_delay; memcpy(dq[dq_h].src, src, 6); dq[dq_h].len = (uint16_t)len; memcpy(dq[dq_h].p, p, (size_t)len);
+            dq_h = (dq_h + 1) % DQ; pthread_cond_signal(&dq_cv);
+        }
+        pthread_mutex_unlock(&dq_mu);
+        return;
+    }
+    deliver_now(src, p, len);
+}
+/* ------------------------------------------------------------ smoother play
+ * The game's netcode is host-relayed lockstep: each client sends its controls
+ * (steer, gas, brake, handbrake) to the host every ~31 ms, the host bundles all
+ * players' controls and sends the bundle back, and every machine drives every car
+ * from the bundles. So a joining player's car only reacts a round trip later.
+ *
+ * For casual play we trade strict lockstep for responsiveness:
+ * 1. A client writes its newest controls into its own block of each bundle it
+ *    gets, so its car reacts at once in its own game.
+ * 2. Its game and the host's then drive that car differently, so every player's
+ *    game is the authority for its own car and the host's for the AI cars: about
+ *    30 times a second each one sends those cars' physics state (position,
+ *    velocity, orientation, spin) and the others overwrite theirs. The host moves
+ *    a client's car ahead by half the round trip (it's that old when it arrives).
+ * RT_NETSYNC=0 turns both off.
+ *
+ * Game packets ("\xEAdat"): fe, payload length, seq, ack, CRC-16 (BE), payload.
+ * A client's controls: payload 06 00 + 4 bytes; a bundle: 06 + 8 blocks of 4 (player
+ * k in block k). CRC: reflected, table at 0x566b54 (poly 0xA001), init 0xFBEA, over
+ * the bytes from fe on with the CRC bytes zero. Cars: 8 pointers at 0x5efac8, car k
+ * = player k, then the AI; physics state at +0x98 (88 bytes). */
+#define CAR_TABLE 0x5efac8u
+#define CAR_STATE 0x98u
+#define CAR_BYTES 88
+#define SYNC_PORT 0x7ea5
+static int sync_on = -1;
+static int my_slot = -1;                  /* client: my block in the bundles (learned) */
+static int am_host, am_client;           /* seen: clients' controls coming in / bundles coming in */
+static double last_race_pkt;             /* a bundle or controls packet: a race is on */
+static uint8_t my_ctl[4]; static uint8_t sent_ctl[256][4]; static double sent_t[256];
+static int slot_votes[8], votes_n;
+static double rtt_s = 0.1;               /* host: round trip to the clients (min over recent acks) */
+static double bundle_t[256];
+static struct { int have; double t; uint8_t st[CAR_BYTES]; } remote[8];
+static double human_seen[8];             /* host: a client's state for this car arrived (it owns it) */
+static pthread_mutex_t sync_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static uint16_t game_crc(const uint8_t *p, int n) {
+    uint16_t c = 0xFBEA;
+    for (int i = 0; i < n; i++) c = (uint16_t)((c >> 8) ^ RD16(0x566b54u + 2u * (uint8_t)(c ^ p[i])));
+    return c;
+}
+static int is_dat(const uint8_t *d, int n) { return n >= 10 && d[0] == 0xEA && d[1] == 'd' && d[2] == 'a' && d[3] == 't' && d[4] == 0xfe && d[5] + 10 == n; }
+static int sync_enabled(void) {
+    if (sync_on < 0) { const char *e = getenv("RT_NETSYNC"); sync_on = !e || atoi(e) != 0; }
+    return sync_on && online;
+}
+static uint32_t car_ptr(int k) {
+    uint32_t c = RD32(CAR_TABLE + 4u * (uint32_t)k);
+    return c >= 0x400000u && c + 0x9ac < GUEST_SIZE ? c : 0;
+}
+/* a game packet going out (game thread) */
+static void sync_out(const uint8_t *d, int n) {
+    if (!sync_enabled() || !is_dat(d, n)) return;
+    if (n == 16 && d[10] == 0x06) {          /* my controls (I'm a client) */
+        pthread_mutex_lock(&sync_mu);
+        memcpy(my_ctl, d + 12, 4); memcpy(sent_ctl[d[6]], d + 12, 4); sent_t[d[6]] = tnow();
+        am_client = 1; last_race_pkt = tnow();
+        pthread_mutex_unlock(&sync_mu);
+    } else if (n == 43 && d[10] == 0x06) {   /* a bundle (I'm the host) */
+        bundle_t[d[6]] = tnow();
+    }
+}
+/* a game packet coming in (network thread): may rewrite a bundle in place */
+static void sync_in(uint8_t *d, int n) {
+    if (!sync_enabled() || !is_dat(d, n)) return;
+    pthread_mutex_lock(&sync_mu);
+    double now = tnow();
+    if (n == 16 && d[10] == 0x06) {          /* a client's controls: its ack tells the round trip */
+        am_host = 1; last_race_pkt = now;
+        double t = bundle_t[d[7]];
+        if (t > 0 && now - t < 1.0) { double r = now - t; rtt_s = r < rtt_s ? r : rtt_s + (r - rtt_s) * 0.02; }
+    } else if (n == 43 && d[10] == 0x06) {   /* a bundle */
+        am_client = 1; last_race_pkt = now;
+        /* learn my block: the one holding what I sent with the acked seq */
+        const uint8_t *sent = sent_ctl[d[7]];
+        if (my_slot < 0 && sent_t[d[7]] > 0 && (sent[0] | sent[1] | sent[2] | sent[3])) {
+            int hit = -1, hits = 0;             /* a client is never block 0 (the host's) */
+            for (int k = 1; k < 8; k++) if (!memcmp(d + 11 + 4 * k, sent, 4)) { hit = k; hits++; }
+            if (hits == 1) slot_votes[hit]++;
+            if (++votes_n >= 8) {
+                int best = 1; for (int k = 2; k < 8; k++) if (slot_votes[k] > slot_votes[best]) best = k;
+                if (slot_votes[best] >= 6) { my_slot = best; rt_log("net: smoother play on, my car is %d", my_slot); }
+                memset(slot_votes, 0, sizeof slot_votes); votes_n = 0;
+            }
+        }
+        if (my_slot > 0) {                    /* my newest controls into my block */
+            memcpy(d + 11 + 4 * my_slot, my_ctl, 4);
+            d[8] = d[9] = 0;
+            uint16_t c = game_crc(d + 4, n - 4); d[8] = (uint8_t)(c >> 8); d[9] = (uint8_t)c;
+        }
+    }
+    pthread_mutex_unlock(&sync_mu);
+}
+/* another player's car states (network thread) */
+static void sync_state_in(const uint8_t *d, int n) {
+    if (!sync_enabled() || n < 4 || d[0] != 'S' || d[1] != 'Y') return;
+    int from = d[2], cnt = d[3];
+    if (n < 4 + cnt * (1 + CAR_BYTES)) return;
+    pthread_mutex_lock(&sync_mu);
+    double now = tnow();
+    for (int i = 0; i < cnt; i++) {
+        const uint8_t *e = d + 4 + i * (1 + CAR_BYTES); int k = e[0];
+        if (k > 7 || k == (am_host ? 0 : my_slot)) continue;        /* never overwrite my own car */
+        remote[k].have = 1; remote[k].t = now; memcpy(remote[k].st, e + 1, CAR_BYTES);
+        if (k == from && am_host) human_seen[k] = now;
+    }
+    pthread_mutex_unlock(&sync_mu);
+}
+/* once a frame on the game thread: send my cars, apply the others' */
+void net_frame(void) {
+    if (!sync_enabled()) return;
+    double now = tnow();
+    if (now - last_race_pkt > 0.5) {
+        if (now - last_race_pkt > 5.0 && (am_host || am_client)) {   /* race over: learn again next time */
+            pthread_mutex_lock(&sync_mu);
+            my_slot = -1; am_host = am_client = 0; memset(human_seen, 0, sizeof human_seen); memset(sent_t, 0, sizeof sent_t);
+            pthread_mutex_unlock(&sync_mu);
+        }
+        return;
+    }
+    if (!car_ptr(0)) return;
+    int me = am_host ? 0 : my_slot;
+    if (me < 0) return;
+    static double last_send;
+    if (now - last_send >= 0.030) {
+        last_send = now;
+        uint8_t pkt[4 + 4 + 8 * (1 + CAR_BYTES)]; int cnt = 0, o = 8;
+        for (int k = 0; k < 8; k++) {
+            uint32_t c = car_ptr(k); if (!c) continue;
+            int mine = k == me || (am_host && k != 0 && now - human_seen[k] > 2.0);
+            if (!mine) continue;
+            pkt[o] = (uint8_t)k; memcpy(pkt + o + 1, G + c + CAR_STATE, CAR_BYTES); o += 1 + CAR_BYTES; cnt++;
+        }
+        pkt[0] = (uint8_t)(SYNC_PORT >> 8); pkt[1] = (uint8_t)SYNC_PORT; pkt[2] = pkt[0]; pkt[3] = pkt[1];
+        pkt[4] = 'S'; pkt[5] = 'Y'; pkt[6] = (uint8_t)me; pkt[7] = (uint8_t)cnt;
+        if (cnt) transport_send(BCAST, pkt, o);
+    }
+    pthread_mutex_lock(&sync_mu);
+    for (int k = 0; k < 8; k++) {
+        if (!remote[k].have || k == me) continue;
+        remote[k].have = 0;
+        if (now - remote[k].t > 0.25) continue;
+        uint32_t c = car_ptr(k); if (!c) continue;
+        float s[CAR_BYTES / 4]; memcpy(s, remote[k].st, CAR_BYTES);
+        if (am_host) {                        /* it left the client half a round trip ago */
+            float dt = (float)(rtt_s * 0.5 + (now - remote[k].t));
+            for (int j = 0; j < 3; j++) s[j] += s[3 + j] * dt;
+        }
+        /* a small position error is taken out over a few updates (a visible snap otherwise), a
+         * big one (a crash, a reset to the track) at once; the rest of the state is set as is */
+        float cur[3]; memcpy(cur, G + c + CAR_STATE, 12);
+        float ex = s[0] - cur[0], ey = s[1] - cur[1], ez = s[2] - cur[2];
+        if (ex * ex + ey * ey + ez * ez < 16.0f) { s[0] = cur[0] + ex * 0.5f; s[1] = cur[1] + ey * 0.5f; s[2] = cur[2] + ez * 0.5f; }
+        memcpy(G + c + CAR_STATE, s, CAR_BYTES);
+    }
+    pthread_mutex_unlock(&sync_mu);
+}
+
+static void deliver_now(const uint8_t src[6], const uint8_t *p, int len) {
     uint16_t dport = (uint16_t)(p[0] << 8 | p[1]), sport = (uint16_t)(p[2] << 8 | p[3]);
+    if (dport == SYNC_PORT) { sync_state_in(p + 4, len - 4); return; }
+    uint8_t buf[MAXPKT + 4];
+    if (len <= (int)sizeof buf) { memcpy(buf, p, (size_t)len); sync_in(buf + 4, len - 4); p = buf; }
     trace_pkt("in ", src, dport, sport, p + 4, len - 4);
     pthread_mutex_lock(&mu);
     stats.rx++; stats.rxb += (uint64_t)len;
@@ -345,6 +542,7 @@ static uint32_t ws_sendto(CPU *c, const uint32_t *a) {
     memcpy(pkt + 4, G + A(1), len);
     stats.tx++; stats.txb += len;
     trace_pkt("out", node, dport, s->port, G + A(1), (int)len);
+    sync_out(G + A(1), (int)len);
     if (!memcmp(node, self_node, 6)) net_deliver(self_node, pkt, (int)len + 4);   /* to ourselves */
     else transport_send(node, pkt, (int)len + 4);
     if (rt_verbose > 1) rt_log("sendto(%#x, %u bytes -> %02x..%02x:%04x)", A(0), len, node[0], node[5], dport);

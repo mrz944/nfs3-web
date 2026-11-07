@@ -127,9 +127,27 @@ is why clients lagged on 1999-era internet links. Packets are tagged `0xEA` +
   game's own protocol already resends a lost packet about one tick later, and
   neither side's send rhythm ever paused for more than 33 ms. The remaining
   client lag is the round trip itself, which is inherent to lockstep. Removing
-  it needs prediction plus rollback (GGPO style: snapshot the guest state, run
-  ahead on predicted inputs, rewind and re-simulate on a misprediction). That
-  isn't done.
+  it with rollback (snapshot the guest state, re-simulate on a misprediction)
+  isn't practical for a recompiled binary, so online play trades strict
+  lockstep for responsiveness (it's casual, not competitive):
+- **Smoother play** (`runtime/net.c`, `RT_NETSYNC=0` turns it off). A client
+  writes its newest controls into its own block of each bundle it receives, so
+  its car reacts at once in its own game. Its game and the host's then drive
+  that car differently, so each player's game is the authority for its own car
+  and the host's for the AI cars. About 30 times a second each one sends those
+  cars' physics state (88 bytes from car+0x98: position, velocity, speed,
+  orientation, spin; port 0x7ea5), and the others overwrite theirs. Small
+  position errors are blended out over a few updates. The host moves a client's
+  car ahead by half the round trip, measured from the game's own acks.
+  - Game packets (`\xEAdat`): `fe`, payload length, seq, ack, CRC-16 (BE),
+    payload. A client's controls: `06 00` + steer, gas, brake, handbrake; a
+    bundle: `06` + 8 such blocks, player k in block k. CRC: reflected, poly
+    0xA001 (table at 0x566b54), init 0xFBEA, over the bytes from `fe` with the
+    CRC bytes zero. A client learns its block from the acks.
+  - Cars: 8 pointers at 0x5efac8, car k = player k, then the AI.
+  - Measured natively (`RT_NET_DELAY`, `RT_CARLOG`): at an 80 ms round trip a
+    client's steering reaches its game after 34 ms instead of 137 ms; both games
+    keep the cars' paths within 0.3 m (95%).
 - Runtime fixes that online play needed: `GetSystemMetrics(SM_NETWORK)` must
   be 1 (otherwise every network option is greyed out); `closesocket` must wake
   threads blocked in `recvfrom`/`select`; `WaitForMultipleObjects(bWaitAll)`

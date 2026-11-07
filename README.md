@@ -220,7 +220,9 @@ bugs much easier to chase than in a browser.
 | `RT_FPS_LOG=1` | log frames per second |
 | `RT_TICK_MS=15.625` · `RT_HEARTBEAT_US=2900` | timed waits wake only on such ticks (like a browser on Windows) · the audio worklet's heartbeat |
 | `RT_NET=unix:PATH RT_ROOM=… RT_NAME=…` | join an online room natively |
-| `RT_NET_TRACE` · `RT_NET_STATS` · `RT_NET_LOSS=%` | packet trace, per-second stats, simulated loss |
+| `RT_NET_TRACE` · `RT_NET_STATS` · `RT_NET_LOSS=%` · `RT_NET_DELAY=ms` | packet trace, per-second stats, simulated loss and latency |
+| `RT_NETSYNC=0` · `RT_CARLOG=ms` | online without the smoother play · log the cars' positions |
+| `RT_MEMDUMP=s:n:frames` | guest memory snapshots to `build/mem/` |
 
 `tools/nettest.sh` runs two headless instances in the same room for multiplayer tests.
 
