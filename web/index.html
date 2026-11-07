@@ -224,6 +224,32 @@
   #log:empty { display: none; }
   .logtoggle { margin: 8px 0 0; font-size: 11px; } .logtoggle a { color: var(--muted); }
   #log.overlay { position: fixed; right: 8px; top: 8px; width: min(560px, 90vw); max-height: 40vh; margin: 0; z-index: 5; }
+
+  /* start page activity (main.js setupActivity) */
+  #activity { margin: 10px 0 4px; }
+  .live { margin: 0 0 4px; color: var(--muted); font-weight: bold; font-size: 12px; }
+  .live.on { color: var(--ok); } .live.on::before { content: "● "; animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  #live-names { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  .ntag { font-size: 11px; padding: 1px 7px; border-radius: 2px; background: #16246e; color: #c8d2ff; }
+  .ntag.racing { background: #ffb400; color: #2a1400; font-weight: bold; }
+  #daily { margin: 6px 0; font-size: 12px; } #daily b { color: var(--gold); } #daily .live { color: var(--ok); display: inline; animation: pulse 2s infinite; }
+  #notify.on { color: var(--ok); }
+  #top { margin-top: 8px; } .tabs { display: flex; gap: 4px; } .tabs button { font-size: 10px; padding: 1px 8px; background: #0d1858; color: var(--muted); border: 1px solid #2e3d8c; cursor: pointer; }
+  .tabs button.on { background: var(--gold); color: #1a0d00; border-color: var(--gold); }
+  #top-list { list-style: none; margin: 4px 0 0; padding: 0; font-size: 12px; }
+  #top-list li { display: grid; grid-template-columns: 1.6em 1fr auto; gap: 6px; padding: 2px 4px; border-top: 1px solid #16205c; }
+  #top-list .r { color: var(--muted); text-align: right; } #top-list li:nth-child(1) .r { color: var(--gold); } #top-list .f { color: var(--ok); }
+  #update { margin-bottom: 10px; border-left-color: var(--ok); }
+  /* loading cover over the game until it really draws, and the small badge for later stalls */
+  #loading { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: radial-gradient(ellipse at 50% 45%, #0e2fa8 0%, #030b3d 60%, #010622 100%); text-align: center; }
+  #loading[hidden], #loadbadge[hidden] { display: none; }
+  #loading .ltitle { font: italic 900 30px var(--head); color: var(--gold); text-transform: uppercase; text-shadow: 2px 2px 0 #2a1400; }
+  #loading-text { margin-top: 8px; color: #d0d9fb; font-size: 13px; }
+  .lbar { width: 220px; height: 4px; margin: 14px auto 0; background: #16246e; overflow: hidden; } .lbar i { display: block; width: 40%; height: 100%; background: var(--gold); animation: lmove 1.2s ease-in-out infinite; }
+  @keyframes lmove { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+  #loadbadge { position: fixed; right: 12px; bottom: 12px; z-index: 20; font-size: 12px; font-weight: bold; color: #1a0d00; background: var(--gold); padding: 3px 10px; border-radius: 2px; }
+  @media (prefers-reduced-motion: reduce) { .lbar i, .live.on::before, #daily .live { animation: none; } }
 </style>
 </head>
 <body>
@@ -266,6 +292,7 @@
     </nav>
 
     <div class="panels" id="setup">
+      <div id="update" class="card" hidden>A newer version of the game is on the server. <button id="update-reload" class="small">Reload to update</button></div>
       <section class="panel">
         <div class="ph"><h2>Status</h2></div>
         <div class="pb">
@@ -281,10 +308,22 @@
         <div class="pb">
           <div class="namebox">
             <label for="pname">Your name</label>
-            <input id="pname" maxlength="16" autocomplete="nickname" placeholder="Player">
+            <input id="pname" maxlength="10" autocomplete="nickname" placeholder="Player1234" title="Up to 10 letters, digits and . _ - !. Used in the lobby and in the game.">
             <span class="muted">Racers online:<span class="counter" id="online-count"><i>0</i><i>0</i><i>0</i></span></span>
           </div>
           <p id="lobby-msg" class="msg" hidden></p>
+
+          <div id="activity">
+            <p id="live-line" class="live">…</p>
+            <div id="live-names"></div>
+            <p id="daily" hidden></p>
+            <button id="notify" class="small secondary" hidden>🔔 Notify me when people race</button>
+            <div id="top" hidden>
+              <div class="bar"><h3>Most Active Racers</h3>
+                <div id="top-tabs" class="tabs"><button data-w="24h">24h</button><button data-w="7d" class="on">7 days</button><button data-w="all">All</button></div></div>
+              <ol id="top-list"></ol>
+            </div>
+          </div>
 
           <section id="lobby">
             <div class="bar">
@@ -424,6 +463,8 @@
 <div id="fps" hidden></div>
 <div id="netbadge" hidden title="Click to copy the room link"></div>
 <div id="hint" hidden>Click to capture the mouse · Esc releases it</div>
+<div id="loading" hidden><div><div class="ltitle">Need for Speed III</div><div id="loading-text">Loading the game…</div><div class="lbar"><i></i></div></div></div>
+<div id="loadbadge" hidden>Loading…</div>
 <script type="module" src="main.js"></script>
 </body>
 </html>

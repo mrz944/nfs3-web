@@ -524,6 +524,8 @@ static void prof_init(void) {
 int main(int argc, char **argv) {
     const char *dir = getenv("NFS3_DIR");
     if (argc > 1) dir = argv[1];
+    /* further arguments KEY=VALUE are settings (the page passes e.g. RT_GLIDE_MODES this way) */
+    for (int i = 2; i < argc; i++) { char *eq = strchr(argv[i], '='); if (eq && eq != argv[i]) { *eq = 0; setenv(argv[i], eq + 1, 1); *eq = '='; } }
 #ifdef __EMSCRIPTEN__
     web_mount_storage();
     if (!dir) dir = "/opfs/nfs3";

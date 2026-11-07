@@ -103,7 +103,53 @@ void net_deliver(const uint8_t src[6], const uint8_t *p, int len) {
 #ifdef __EMSCRIPTEN__
 /* the page owns the connection: packets out go to Module.netSend on the main
  * thread; packets in arrive via rt_net_packet */
+/* Network worker (web/net-worker.js, when the page turns it on): packets for peers without a
+ * direct WebRTC link go through two rings in this memory to a Web Worker that owns its own
+ * relay socket, so they never wait for the busy main thread. Each record: u32 len, then
+ * [node 6][packet]. Out: game threads -> worker (the worker sleeps on `head`). In: worker ->
+ * net_in_main() below (sleeps on `head`). Packets still go to the main thread as well; it sends
+ * only to peers with an open direct link, the worker only to the others. */
+#define NRING (256u << 10)
+typedef struct { volatile uint32_t head, tail; uint32_t cap, dropped; uint8_t data[NRING]; } NetRing;
+static NetRing ring_out = { 0, 0, NRING, 0 }, ring_in = { 0, 0, NRING, 0 };
+static volatile int use_worker;
+static pthread_mutex_t out_mu = PTHREAD_MUTEX_INITIALIZER;
+static void ring_put(NetRing *r, const uint8_t dst[6], const uint8_t *pkt, int len) {
+    uint32_t n = (uint32_t)len + 6, h = r->head, t = __atomic_load_n(&r->tail, __ATOMIC_ACQUIRE);
+    if (NRING - (h - t) < n + 4) { r->dropped++; return; }
+    uint8_t hdr[10]; memcpy(hdr, &n, 4); memcpy(hdr + 4, dst, 6);
+    for (uint32_t i = 0; i < 10; i++) r->data[(h + i) % NRING] = hdr[i];
+    for (uint32_t i = 0; i < (uint32_t)len; i++) r->data[(h + 10 + i) % NRING] = pkt[i];
+    __atomic_store_n(&r->head, h + 4 + n, __ATOMIC_RELEASE);
+    __builtin_wasm_memory_atomic_notify((int *)&r->head, 1);
+}
+static void *net_in_main(void *unused) {
+    (void)unused;
+    static uint8_t buf[2048];
+    for (;;) {
+        uint32_t t = ring_in.tail, h = __atomic_load_n(&ring_in.head, __ATOMIC_ACQUIRE);
+        if (t == h) { __builtin_wasm_memory_atomic_wait32((int *)&ring_in.head, (int)h, -1); continue; }
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < 4; i++) n |= (uint32_t)ring_in.data[(t + i) % NRING] << (8 * i);
+        if (n <= sizeof buf) {
+            for (uint32_t i = 0; i < n; i++) buf[i] = ring_in.data[(t + 4 + i) % NRING];
+            if (n > 6) net_deliver(buf, buf + 6, (int)n - 6);
+        }
+        __atomic_store_n(&ring_in.tail, t + 4 + n, __ATOMIC_RELEASE);
+    }
+    return NULL;
+}
+/* the page: [out ring, in ring] addresses; on = 0 turns the worker path off again (fallback) */
+EMSCRIPTEN_KEEPALIVE uint32_t *rt_net_worker(int on) {
+    static uint32_t addr[2]; static int started;
+    addr[0] = (uint32_t)(uintptr_t)&ring_out; addr[1] = (uint32_t)(uintptr_t)&ring_in;
+    if (on && !started) { started = 1; pthread_t th; pthread_create(&th, NULL, net_in_main, NULL); }
+    use_worker = on;
+    rt_log("net: network worker %s", on ? "on" : "off");
+    return addr;
+}
 static void transport_send(const uint8_t dst[6], const uint8_t *pkt, int len) {
+    if (use_worker) { pthread_mutex_lock(&out_mu); ring_put(&ring_out, dst, pkt, len); pthread_mutex_unlock(&out_mu); }
     uint8_t *b = malloc((size_t)len + 6);
     memcpy(b, dst, 6); memcpy(b + 6, pkt, (size_t)len);
     MAIN_THREAD_ASYNC_EM_ASM({ if (Module.netSend) Module.netSend($0, $1); else _free($0); }, b, len + 6);

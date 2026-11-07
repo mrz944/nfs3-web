@@ -10,9 +10,13 @@
 //   raw TCP    (optional port)     native test builds: frames = u32 len | u8 kind | body
 // Messages (kind 0 = JSON text, kind 1 = binary packet):
 //   -> {t:'list'}                         <- {t:'rooms', rooms:[...]} now and on every change (room browser)
-//   -> {t:'create', room:{name, password, max, listed}, name}
-//   -> {t:'hello', room, name, password, mustExist}
-//                                         <- {t:'welcome', id, room, info, peers:[{id,name,state}]} | {t:'error', code, error}
+//   -> {t:'create', room:{name, password, max, listed}, name, build}
+//   -> {t:'hello', room, name, password, mustExist, build}
+//                                         <- {t:'welcome', id, room, info, peers:[{id,name,state}], token} | {t:'error', code, error}
+//      build: the page's game build; a room only takes members of the build it was made with
+//      (different builds desync in a race). Names: see cleanName().
+//   -> {t:'attach', token}                (a second socket, from the page's network worker: from
+//                                         then on this member's binary packets use that socket)
 //   -> {t:'leave'}
 //   <- {t:'join', id, name} / {t:'leave', id}
 //   -> {t:'state', state}                 <- {t:'state', id, state}       ('lobby' | 'game')
@@ -22,13 +26,34 @@
 //   -> binary [dst node 6][payload]       <- binary [src node 6][payload]  (dst ff.. = everyone)
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer as createTcpServer } from 'node:net';
-import { rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 const rooms = new Map();         // code -> Room
 const watchers = new Set();      // clients looking at the room browser
 const MAX_ROOM = 8;              // NFS3 races take up to 8 players
 const BCAST = 'ffffffffffff';
 const CODE_ABC = 'abcdefghjkmnpqrstuvwxyz23456789';
+
+// Player names: what the game can show (it stores 10 characters), no look-alike tricks,
+// and nothing from a short list of slurs. Empty or rejected -> the page picks Player1234.
+export const NAME_MAX = 10;
+const BANNED = ['nigg', 'fagg', 'hitler', 'nazi', 'kike', 'retard', 'rape', 'pedo', 'cunt', 'whore', 'chink', 'spic'];
+const leet = (s) => s.toLowerCase().replace(/[0@]/g, 'o').replace(/[1!|]/g, 'i').replace(/3/g, 'e').replace(/4/g, 'a').replace(/[5$]/g, 's').replace(/7/g, 't').replace(/[^a-z]/g, '');
+export const cleanName = (v) => String(v ?? '').replace(/[^A-Za-z0-9 ._!-]/g, '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
+export const badName = (n) => { const l = leet(n); return BANNED.some((b) => l.includes(b)); };
+const build = (v) => String(v ?? '').replace(/[^\w.:-]/g, '').slice(0, 80);
+
+// racing time per name (for the start page's board): one line per finished game session
+let playLog = null;
+export function setPlayLog(dir) { mkdirSync(dir, { recursive: true }); playLog = dir; }
+function logPlay(name, secs) {
+  if (!playLog || secs < 20) return;
+  try { appendFileSync(join(playLog, `play-${new Date().toISOString().slice(0, 7)}.jsonl`), JSON.stringify({ t: Date.now(), n: name, s: Math.round(secs) }) + '\n'); } catch {}
+}
+const onRoom = new Set();          // listeners for new listed rooms (push notifications)
+export const onRoomCreated = (f) => onRoom.add(f);
+const tokens = new Map();          // token -> Client, for the network worker's socket
 
 const clean = (v, n) => String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, n);
 const hashPw = (salt, pw) => createHash('sha256').update(salt + '\0' + pw).digest();
@@ -38,12 +63,12 @@ function newCode() {
     if (!rooms.has(c)) return c;
   }
 }
-function newRoom(code, { name, password, max, listed } = {}, owner = '') {
+function newRoom(code, { name, password, max, listed } = {}, owner = '', b = '') {
   const pw = clean(password, 64), salt = randomBytes(8).toString('hex');
   const room = {
     code, name: clean(name, 32) || code, owner, listed: listed !== false, created: Date.now(),
     max: Math.min(MAX_ROOM, Math.max(2, Number(max) || MAX_ROOM)),
-    salt, pass: pw ? hashPw(salt, pw) : null, members: new Map(),
+    salt, pass: pw ? hashPw(salt, pw) : null, members: new Map(), build: b,
   };
   rooms.set(code, room);
   return room;
@@ -75,15 +100,18 @@ class Client {
   constructor(sendText, sendBin, close, label) {
     this.sendText = sendText; this.sendBin = sendBin; this.close = close; this.label = label;
     this.id = null; this.room = null; this.name = ''; this.rtt = null; this.state = 'lobby';
+    this.token = null; this.gameSince = 0; this.bin = null;
   }
+  send(b) { (this.bin || this.sendBin)(b); }
   json(o) { this.sendText(JSON.stringify(o)); }
   fail(code, error) { this.json({ t: 'error', code, error }); }
   enter(room, name) {
-    this.room = room; this.name = clean(name, 16) || 'Player'; this.id = newId(room); this.state = 'lobby';
+    this.room = room; this.name = cleanName(name) || 'Player'; this.id = newId(room); this.state = 'lobby';
+    this.token = randomBytes(12).toString('hex'); tokens.set(this.token, this);
     const peers = [...room.members.values()].map((c) => ({ id: c.id, name: c.name, state: c.state }));
     room.members.set(this.id, this);
     if (!room.owner) room.owner = this.name;
-    this.json({ t: 'welcome', id: this.id, room: room.code, info: roomInfo(room), peers });
+    this.json({ t: 'welcome', id: this.id, room: room.code, info: roomInfo(room), peers, token: this.token });
     for (const c of room.members.values()) if (c !== this) c.json({ t: 'join', id: this.id, name: this.name });
     console.log(`[relay] ${this.label} joined ${room.code} "${room.name}" as ${this.id} (${this.name}), ${room.members.size}/${room.max}`);
     roomsChanged();
@@ -93,17 +121,22 @@ class Client {
     if (m.t === 'list') {
       watchers.add(this);
       this.json({ t: 'rooms', rooms: [...rooms.values()].filter((r) => r.listed).map(roomInfo) });
+    } else if ((m.t === 'create' || m.t === 'hello') && !this.id && badName(cleanName(m.name))) {
+      this.fail('name', 'Please pick another name.');
     } else if (m.t === 'create' && !this.id) {
-      const room = newRoom(newCode(), m.room || {}, clean(m.name, 16) || 'Player');
+      const room = newRoom(newCode(), m.room || {}, cleanName(m.name) || 'Player', build(m.build));
       this.enter(room, m.name);
+      if (room.listed) for (const f of onRoom) try { f(roomInfo(room)); } catch {}
     } else if (m.t === 'hello' && !this.id) {
       const code = String(m.room || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32);
       if (!code) return this.fail('noroom', 'No room given.');
       let room = rooms.get(code);
       if (!room) {
         if (m.mustExist) return this.fail('gone', 'This room no longer exists.');
-        room = newRoom(code, { name: code, listed: false });     // native test builds: RT_ROOM=name
+        room = newRoom(code, { name: code, listed: false }, '', build(m.build));     // native test builds: RT_ROOM=name
       }
+      if (room.build && build(m.build) && room.build !== build(m.build))
+        return this.fail('version', 'This room runs another version of the game. Reload the page to update, or ask the room to reload.');
       if (room.members.size >= room.max) return this.fail('full', 'This room is full.');
       if (room.pass) {
         const given = hashPw(room.salt, clean(m.password, 64));
@@ -112,8 +145,15 @@ class Client {
       this.enter(room, m.name);
     } else if (m.t === 'leave') {
       this.gone();
+    } else if (m.t === 'attach') {
+      const owner = tokens.get(String(m.token || ''));
+      if (owner) { owner.bin = this.sendBin; this.binFor = owner; this.json({ t: 'attached' }); }
+      else this.fail('token', 'Unknown token.');
     } else if (m.t === 'state' && this.id) {
+      const was = this.state;
       this.state = m.state === 'game' ? 'game' : 'lobby';
+      if (this.state === 'game' && was !== 'game') this.gameSince = Date.now();
+      if (this.state !== 'game' && was === 'game') { logPlay(this.name, (Date.now() - this.gameSince) / 1000); this.gameSince = 0; }
       for (const c of this.room.members.values()) if (c !== this) c.json({ t: 'state', id: this.id, state: this.state });
       roomsChanged();
     } else if (m.t === 'signal' && this.id) {
@@ -127,15 +167,18 @@ class Client {
     }
   }
   onBin(buf) {
+    if (this.binFor) { this.binFor.onBin(buf); return; }   // the network worker's socket speaks for its page
     if (!this.id || buf.length < 7) return;
     const dst = buf.subarray(0, 6).toString('hex');
     const out = Buffer.allocUnsafe(buf.length);
     Buffer.from(this.id, 'hex').copy(out, 0); buf.copy(out, 6, 6);
-    if (dst === BCAST) { for (const c of this.room.members.values()) if (c !== this) c.sendBin(out); }
-    else this.room.members.get(dst)?.sendBin(out);
+    if (dst === BCAST) { for (const c of this.room.members.values()) if (c !== this) c.send(out); }
+    else this.room.members.get(dst)?.send(out);
   }
   gone() {
     if (!this.id) return;
+    if (this.state === 'game' && this.gameSince) logPlay(this.name, (Date.now() - this.gameSince) / 1000);
+    tokens.delete(this.token); this.token = null; this.bin = null;
     const room = this.room;
     room.members.delete(this.id);
     for (const c of room.members.values()) c.json({ t: 'leave', id: this.id });
@@ -145,7 +188,11 @@ class Client {
     this.id = null; this.room = null;
     roomsChanged();
   }
-  closed() { watchers.delete(this); this.gone(); }
+  closed() {
+    watchers.delete(this);
+    if (this.binFor) { if (this.binFor.bin === this.sendBin) this.binFor.bin = null; this.binFor = null; }   // back to the page's socket
+    this.gone();
+  }
 }
 
 // ---------------------------------------------------------------- WebSocket
@@ -220,4 +267,16 @@ export function listenRaw(port, host = '127.0.0.1') {
 
 export function roomStats() {
   return [...rooms.values()].map(roomInfo);
+}
+
+// for the start page (/__live): who is around right now. Names only from listed rooms;
+// players in unlisted rooms are counted but not named.
+export function liveSummary() {
+  let racing = 0, lobby = 0;
+  const names = [];
+  for (const r of rooms.values()) for (const c of r.members.values()) {
+    if (c.state === 'game') racing++; else lobby++;
+    if (r.listed) names.push({ n: c.name, racing: c.state === 'game' });
+  }
+  return { racing, lobby, rooms: [...rooms.values()].filter((r) => r.listed).length, names: names.slice(0, 40) };
 }

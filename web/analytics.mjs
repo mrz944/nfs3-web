@@ -9,7 +9,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const EVENTS = new Set(['view', 'import', 'start', 'first_frame', 'room_create', 'room_join', 'online_start', 'error', 'end']);
+const EVENTS = new Set(['view', 'import', 'start', 'first_frame', 'load', 'room_create', 'room_join', 'online_start', 'push', 'error', 'end']);
+// load phases (main.js mark()): seconds since the page opened
+const PHASES = [['download', 'game download (first visit)'], ['files', 'game files ready'], ['click', 'Start pressed'], ['wasm', 'runtime running'], ['first', 'first frame'], ['shown', 'game visible']];
 let salt = { day: '', value: '' };
 const today = () => new Date().toISOString().slice(0, 10);
 function visitor(req) {
@@ -95,6 +97,11 @@ table{border-collapse:collapse;width:100%;font-size:12px}th{text-align:left;colo
       card('median play time', playM != null ? playM.toFixed(1) + ' min' : '–'), card('median fps', fps != null ? Math.round(fps) : '–'), card('errors', by('error').length),
       card('racers online now', rooms.reduce((n, r) => n + r.players.length, 0)),
     ].join('')}</div>
+<h2>Load phases</h2><div class="m">Median seconds since the page opened (download: how long the game download took). Left while loading: ${by('error').filter((r) => r.d.kind === 'left_loading').length}.</div>
+<div class="wrap">${table(['phase', 'median', 'all loads', 'cached loads'], PHASES.map(([k, label]) => {
+      const all = by('load').map((r) => r.d[k]).filter((x) => typeof x === 'number'), cached = by('load').filter((r) => r.d.cached).map((r) => r.d[k]).filter((x) => typeof x === 'number');
+      return [label, median(all) != null ? median(all).toFixed(1) + ' s' : '–', all.length, median(cached) != null ? median(cached).toFixed(1) + ' s' : '–'];
+    }))}</div>
 <h2>By day</h2><div class="wrap">${table(['day', 'visitors', 'views', 'game starts', 'online starts', 'errors'], [...days].sort((a, b) => b[0].localeCompare(a[0])).map(([d, x]) => [d, x.visitors.size, x.views, x.starts, x.online, x.errors]))}</div>
 <div class="cols"><div><h2>Browsers</h2>${table(['browser', 'views'], count(views, (r) => `${r.d.browser} ${r.d.version || ''} · ${r.d.os}`).slice(0, 12))}</div>
 <div><h2>Screens</h2>${table(['viewport', 'views'], count(views, (r) => `${r.d.w}×${r.d.h}`).slice(0, 12))}</div></div>

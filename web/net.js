@@ -68,6 +68,10 @@ export class Net extends EventTarget {
     try { this.myFps = Number(localStorage.getItem('nfs3.lastFps')) || 0; } catch { this.myFps = 0; }
     this.rooms = [];             // room browser
     this.waiting = null;         // pending create/join: { resolve, reject }
+    this.build = '';             // the page's game build: rooms only take members of their own build
+    this.token = null;           // lets the network worker's socket speak for us (relay.mjs attach)
+    this.useWorker = false;      // packets for relayed peers through net-worker.js (see attach())
+    this.worker = null; this.workerOn = false;
   }
 
   // ------------------------------------------------------------- server
@@ -105,7 +109,7 @@ export class Net extends EventTarget {
   onMessage(m) {
     if (m.t === 'rooms') { this.rooms = m.rooms; this.emit('rooms', m.rooms); }
     else if (m.t === 'welcome') {
-      this.id = m.id; this.room = m.room; this.info = m.info;
+      this.id = m.id; this.room = m.room; this.info = m.info; this.token = m.token;
       for (const p of m.peers) this.addPeer(p.id, p.name, true, p.state);   // we are the newcomer: we call them
       this.emit('status');
       this.waiting?.resolve(m); this.waiting = null;
@@ -125,8 +129,8 @@ export class Net extends EventTarget {
       setTimeout(() => { if (this.waiting?.resolve === resolve) { this.waiting = null; reject(new Error('The online server did not answer.')); } }, 8000);
     }));
   }
-  create(room, name) { return this.request({ t: 'create', room, name }); }
-  join(code, name, password) { return this.request({ t: 'hello', room: code, name, password, mustExist: true }); }
+  create(room, name) { return this.request({ t: 'create', room, name, build: this.build }); }
+  join(code, name, password) { return this.request({ t: 'hello', room: code, name, password, mustExist: true, build: this.build }); }
   leave() { this.send({ t: 'leave' }); this.dropRoom(); this.emit('status'); }
   setState(state) { this.state = state; this.send({ t: 'state', state }); }
   dropRoom() {
@@ -137,6 +141,7 @@ export class Net extends EventTarget {
     const p = this.peers.get(id); if (!p) return;
     clearInterval(p.statsTimer); try { p.pc.close(); } catch {}
     this.peers.delete(id); this.pingTable.delete(id);
+    this.postPeers();
   }
   send(o) { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(o)); }
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
@@ -147,12 +152,13 @@ export class Net extends EventTarget {
                 tx: { seq: 0, hist: [] }, rx: { hi: null, seen: new Set(), gaps: 0, recovered: 0 },
                 ctr: { tx: 0, txRelay: 0, rx: 0, rxRelay: 0, last: 0, maxGap: 0, gaps: 0, recovered: 0 } };
     this.peers.set(id, p);
+    this.postPeers();
     p.pc.onicecandidate = (e) => { if (e.candidate) this.send({ t: 'signal', to: id, data: { ice: e.candidate } }); };
     p.pc.onconnectionstatechange = () => { if (p.pc.connectionState === 'failed') this.emit('log', `no direct connection to ${name}, using the relay`); this.emit('status'); };
     const setup = (dc) => {
       p.dc = dc; dc.binaryType = 'arraybuffer';
-      dc.onopen = () => { p.direct = true; this.emit('log', `direct connection to ${name}`); this.emit('status'); };
-      dc.onclose = () => { p.direct = false; this.emit('status'); };
+      dc.onopen = () => { p.direct = true; this.postPeers(); this.emit('log', `direct connection to ${name}`); this.emit('status'); };
+      dc.onclose = () => { p.direct = false; this.postPeers(); this.emit('status'); };
       dc.onmessage = (ev) => { for (const pkt of unframe(p.rx, new Uint8Array(ev.data))) this.deliver(id, pkt); };
     };
     if (initiator) {
@@ -193,9 +199,33 @@ export class Net extends EventTarget {
     };
     for (const [src, pkt] of this.queue) this.deliver(src, pkt);
     this.queue = [];
+    if (this.useWorker && this.token) this.startWorker(mod);
   }
+  // The network worker (net-worker.js) takes the packets for peers without a direct link off
+  // the main thread: runtime/net.c also writes every packet into a shared ring, the worker sends
+  // the relayed ones over its own socket and puts incoming ones straight into the game's ring.
+  // If it can't attach (or its socket drops), the main thread carries everything as before.
+  startWorker(mod) {
+    const a = mod._rt_net_worker(1), dv = new DataView(mod.HEAPU8.buffer);
+    const out = dv.getUint32(a, true), inn = dv.getUint32(a + 4, true);
+    const w = this.worker = new Worker(new URL('net-worker.js', import.meta.url));
+    const off = (why) => { if (this.workerOn) this.emit('log', `network worker off (${why}), packets go through the page`); this.workerOn = false; mod._rt_net_worker(0); };
+    const fallback = setTimeout(() => { if (!this.workerOn) off('no answer'); }, 4000);
+    w.onmessage = (e) => {
+      const d = e.data;
+      if (d.attached) { clearTimeout(fallback); this.workerOn = true; mod._rt_net_worker(1); this.postPeers(); this.emit('log', 'network worker on: relayed packets bypass the main thread'); }
+      else if (d.closed) off('socket closed');
+      else if (d.error) off(d.error);
+      else if (d.stats) for (const [id, [tx, rx]] of Object.entries(d.stats)) { const c = this.peers.get(id)?.ctr; if (c) { c.tx += tx; c.txRelay += tx; c.rx += rx; c.rxRelay += rx; c.last = performance.now(); } }
+    };
+    w.onerror = (e) => off('error ' + (e.message || ''));
+    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/net`;
+    w.postMessage({ init: { buffer: mod.HEAPU8.buffer, out, in: inn, url: wsUrl, token: this.token } });
+  }
+  postPeers() { this.worker?.postMessage({ peers: [...this.peers].map(([id, p]) => [id, p.dc?.readyState === 'open']) }); }
   sendTo(id, pkt) {
     const p = this.peers.get(id);
+    if (this.workerOn && p?.dc?.readyState !== 'open') return;           // the worker sends this one
     if (p) p.ctr.tx++;
     if (p?.dc?.readyState === 'open') { try { p.dc.send(frame(p.tx, pkt)); return; } catch {} }
     if (p) p.ctr.txRelay++;

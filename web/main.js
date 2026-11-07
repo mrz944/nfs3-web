@@ -42,6 +42,8 @@ let playStats = { played: false, frames: 0, ms: 0 };
 track('view', { w: innerWidth, h: innerHeight, lang: navigator.language, room_link: !!location.hash.match(/room=/) });
 window.addEventListener('pagehide', () => track('end', { secs: (Date.now() - pageT0) / 1000, played: playStats.played, fps: playStats.ms ? playStats.frames * 1000 / playStats.ms : 0 }));
 window.addEventListener('pagehide', () => flushLog(true));
+// gave up while the game was loading (black screen, too slow): worth knowing, with the phases so far
+window.addEventListener('pagehide', () => { if (phase.click != null && phase.shown == null) track('error', { kind: 'left_loading', msg: Object.entries(phase).map(([k, v]) => `${k}=${v}`).join(' '), secs: (performance.now() - t0) / 1000 }); });
 for (const k of ['log', 'warn', 'error']) { const orig = console[k].bind(console); console[k] = (...a) => { orig(...a); log(...a.map(String)); }; }
 window.addEventListener('error', (e) => log('ERROR', e.message, e.filename ? `${e.filename}:${e.lineno}` : ''));
 window.addEventListener('unhandledrejection', (e) => log('ERROR (promise)', e.reason?.stack || e.reason));
@@ -83,6 +85,149 @@ async function serverFiles() {
     }),
   }));
 }
+
+// Static game pack (tools/pack-game.mjs, hosted on Cloudflare R2 or any CDN with CORS).
+// web/game-source.json = {"url": "https://files.example.com/nfs3/<id>/"}. The page reads
+// <url>index.json, then streams each chunk-NNN.gz through the browser's gzip decoder
+// straight into OPFS, file by file. Finished chunks are remembered, so a reload resumes
+// with the next chunk instead of starting over.
+async function packSource() {
+  try {
+    const r = await fetch('game-source.json', { cache: 'no-cache' });
+    if (!r.ok) return null;
+    const { url } = await r.json();
+    return url ? url.replace(/\/?$/, '/') : null;
+  } catch { return null; }
+}
+async function readText(dir, name) { try { return await (await (await dir.getFileHandle(name)).getFile()).text(); } catch { return null; } }
+async function writeText(dir, name, text) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(text); await w.close(); }
+async function importPack(base) {
+  status('Checking the game download…');
+  const ir = await fetch(base + 'index.json');
+  if (!ir.ok) throw new Error(`Game download unavailable (${ir.status}). Reload to retry.`);
+  const idx = await ir.json();
+  if (idx.format !== 1) throw new Error('Unknown game pack format. Reload to retry.');
+  if (buildInfo?.exe_sha256 && idx.exe_sha256 !== buildInfo.exe_sha256)
+    throw new Error(`The hosted game files don't match this build (nfs3.exe ${idx.exe_sha256.slice(0, 12)}…, build expects ${buildInfo.exe_sha256.slice(0, 12)}…).`);
+  const root = await navigator.storage.getDirectory();
+  let dir = await gameDir(true);
+  if ((await readText(dir, '.pack-id')) !== idx.id) {               // other or no earlier download: start clean
+    await root.removeEntry(GAME_DIR, { recursive: true }).catch(() => {});
+    dir = await gameDir(true);
+    await writeText(dir, '.pack-id', idx.id);
+  }
+  const doneChunks = new Set(((await readText(dir, '.pack-done')) || '').split(',').filter(Boolean));
+  const dirs = new Map([['', dir]]);
+  const subdir = async (path) => {
+    const parts = path.split('/').slice(0, -1);
+    let key = '', d = dir;
+    for (const p of parts) { key += p + '/'; if (!dirs.has(key)) dirs.set(key, await d.getDirectoryHandle(p, { create: true })); d = dirs.get(key); }
+    return d;
+  };
+  const MB = 2 ** 20, t0 = performance.now();
+  let got = idx.chunks.filter((c) => doneChunks.has(c.name)).reduce((s, c) => s + c.gz, 0), fresh = 0;
+  $('progress').hidden = false;
+  const show = () => {
+    $('progress').value = got / idx.gz;
+    const secs = (performance.now() - t0) / 1000, rate = fresh / Math.max(secs, 0.5);
+    status(`Downloading the game files… ${(got / MB).toFixed(0)} / ${(idx.gz / MB).toFixed(0)} MB` + (secs > 2 && rate > 0 ? ` · ${(rate / MB).toFixed(1)} MB/s` : ''));
+  };
+  if (got) log(`game pack ${idx.id}: resuming, ${doneChunks.size}/${idx.chunks.length} chunks already here`);
+  for (const c of idx.chunks) {
+    if (doneChunks.has(c.name)) continue;
+    let lastErr;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const before = got, beforeFresh = fresh;
+      try {
+        const r = await fetch(base + c.name);
+        if (!r.ok) throw new Error(`${c.name}: HTTP ${r.status}`);
+        const counted = r.body.pipeThrough(new TransformStream({ transform(b, ctl) { got += b.length; fresh += b.length; show(); ctl.enqueue(b); } }));
+        const rd = counted.pipeThrough(new DecompressionStream('gzip')).getReader();
+        let buf = new Uint8Array(0);                          // decoded bytes not yet written
+        const pull = async () => { const { done, value } = await rd.read(); if (done) throw new Error(`${c.name}: ended early`); buf = buf.length ? concat(buf, value) : value; };
+        for (const [path, size] of c.files) {
+          const fh = await (await subdir(path)).getFileHandle(path.split('/').at(-1), { create: true });
+          const isIni = path.toLowerCase() === 'nfs3.ini', ini = [];
+          const w = await fh.createWritable();
+          let left = size;
+          while (left > 0) {
+            if (!buf.length) await pull();
+            const n = Math.min(left, buf.length), part = buf.subarray(0, n);
+            if (isIni) ini.push(part.slice()); else await w.write(part);
+            buf = buf.subarray(n); left -= n;
+          }
+          if (isIni) await w.write(patchIni(new TextDecoder('latin1').decode(concat(...ini))));
+          await w.close();
+        }
+        doneChunks.add(c.name);
+        await writeText(dir, '.pack-done', [...doneChunks].join(','));
+        lastErr = null; break;
+      } catch (e) {
+        lastErr = e; got = before; fresh = beforeFresh;
+        log(`game pack: ${c.name} failed (${e.message}), attempt ${attempt + 1}`);
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    }
+    if (lastErr) throw new Error(`Download failed: ${lastErr.message}. Reload to continue where it stopped.`);
+  }
+  for (const d of idx.dirs || []) await subdir(d + '/');
+  log(`game pack ${idx.id}: ${(fresh / MB).toFixed(0)} MB in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
+  await writeText(dir, '.download-complete', 'complete');
+  $('progress').hidden = true;
+}
+function concat(...parts) {
+  const out = new Uint8Array(parts.reduce((s, p) => s + p.length, 0));
+  let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+// ------------------------------------------------------------------ names
+// One name everywhere: the lobby, the relay (relay.mjs cleanName) and the game. The game keeps
+// 10 characters and only has glyphs for plain letters, digits and a few signs.
+const NAME_MAX = 10;
+const cleanName = (v) => String(v || '').replace(/[^A-Za-z0-9 ._!-]/g, '').replace(/\s+/g, ' ').trimStart().slice(0, NAME_MAX);
+const randomName = () => 'Player' + Math.floor(1000 + Math.random() * 9000);
+// Before the game starts, put the name where the game reads it:
+//  - fedata/text/text.eng: the default "Player1" (a string table: u32 offsets, then
+//    NUL-terminated strings), used until the game has saved its own settings. Rebuilt each
+//    time from the untouched copy text.eng.orig, so names never pile up.
+//  - fedata/config/config.dat, once the game has saved it: the player name fields
+//    (11 bytes each) of player 1 and the network player.
+async function writeGameName(name) {
+  name = cleanName(name).trim();
+  if (!name) return;
+  const latin = new TextEncoder();
+  try {
+    const text = await (await gameDir()).getDirectoryHandle('fedata').then((d) => d.getDirectoryHandle('text'));
+    let orig = await fileBytes(text, 'text.eng.orig');
+    if (!orig) { orig = await fileBytes(text, 'text.eng'); if (orig) await writeBytes(text, 'text.eng.orig', orig); }
+    if (orig) {
+      const dv = new DataView(orig.buffer, orig.byteOffset, orig.byteLength), n = dv.getUint32(0, true) / 4;
+      const strs = [];
+      for (let i = 0; i < n; i++) { const o = dv.getUint32(i * 4, true); let e = o; while (e < orig.length && orig[e]) e++; strs.push(orig.subarray(o, e)); }
+      const p1 = latin.encode('Player1'), nm = latin.encode(name);
+      const eq = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+      const out = strs.map((x) => (eq(x, p1) ? nm : x));
+      const size = n * 4 + out.reduce((t, x) => t + x.length + 1, 0), buf = new Uint8Array(size), odv = new DataView(buf.buffer);
+      let o = n * 4;
+      out.forEach((x, i) => { odv.setUint32(i * 4, o, true); buf.set(x, o); o += x.length + 1; });
+      await writeBytes(text, 'text.eng', buf);
+    }
+  } catch (e) { log('name: text.eng not patched:', e.message); }
+  try {
+    const cfgDir = await (await gameDir()).getDirectoryHandle('fedata').then((d) => d.getDirectoryHandle('config'));
+    const cfg = await fileBytes(cfgDir, 'config.dat');
+    if (cfg && cfg.length === 8432) {
+      const printable = (o) => { let k = 0; while (k < 11 && cfg[o + k]) { if (cfg[o + k] < 32 || cfg[o + k] > 126) return false; k++; } return k < 11; };
+      let n = 0;
+      for (const o of [0x17bc, 0x1a20, 0x1a8c]) if (printable(o)) { cfg.fill(0, o, o + 11); cfg.set(latin.encode(name), o); n++; }
+      if (n) await writeBytes(cfgDir, 'config.dat', cfg);
+    }
+  } catch {}
+  log(`name: the game will call you "${name}"`);
+}
+async function fileBytes(dir, name) { try { return new Uint8Array(await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer()); } catch { return null; } }
+async function writeBytes(dir, name, bytes) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(bytes); await w.close(); }
 
 // the browser build renders through the Voodoo2 (Glide) driver -> WebGL2
 const patchIni = (t) => t.replace(/^ThrashDriver\s*=.*$/mi, 'ThrashDriver=glide3x');
@@ -247,10 +392,18 @@ function gameStopped(msg) {
 }
 
 // -------------------------------------------------------------------- boot
+// load phases (seconds since the page opened), sent with the 'load' event and shown on /__stats:
+// files = game files ready, click = Start pressed, wasm = runtime running, first = first frame,
+// shown = the loading cover lifted (the game is really drawing)
+const phase = {};
+const mark = (k) => { if (phase[k] == null) phase[k] = Math.round(performance.now() / 100) / 10; };
+
 async function start() {
   $('start').disabled = true;
+  mark('click');
   status('Loading the recompiled game…');
   await ensureIni();
+  await writeGameName($('pname')?.value);
   const startT = performance.now();
   const dev = await deviceInfo();
   log('device:', Object.entries(dev).map(([k, v]) => `${k}=${v}`).join(' '));
@@ -272,6 +425,7 @@ async function start() {
     printErr: (t) => console.log(t),
   });
   log('runtime ready, game thread running');
+  mark('wasm');
   if (net.id) { mod.ccall('rt_net_set_node', null, ['string'], [net.id]); net.attach(mod); net.setState('game'); showNetBadge(); }
   startPerfLog(mod);
   // keep the log over the game until frames arrive (always with ?log)
@@ -282,6 +436,11 @@ async function start() {
   $('setup-wrap').hidden = true; $('bg').hidden = true;
   $('screen').style.display = 'block';
   $('hint').hidden = false;
+  // Loading cover: up until the game has really drawn a few frames (the first ones are an
+  // empty screen), then a small "Loading…" badge whenever no new frame comes for 1.5 s
+  // (the game loading a track, or stuck). This is the page's own text, never the game's.
+  const cover = $('loading'), badge = $('loadbadge');
+  cover.hidden = false;
   const canvas = $('canvas');
   attachInput(mod, canvas);
   startAudio(mod).catch((e) => log('audio unavailable:', e.message || e));
@@ -299,9 +458,17 @@ async function start() {
       if (stalled) log(`stall over after ${((performance.now() - lastFresh) / 1000).toFixed(1)} s`);
       stalled = false; lastFresh = performance.now();
       fpsN++;
-      if (first) { first = false; log('first frame'); track('first_frame', { secs: (performance.now() - startT) / 1000 }); playStats.played = true; }
+      if (first) { first = false; mark('first'); log('first frame'); track('first_frame', { secs: (performance.now() - startT) / 1000 }); playStats.played = true; }
       playStats.frames++;
+      if (!cover.hidden && playStats.frames >= 8) {
+        cover.hidden = true; mark('shown');
+        track('load', { ...phase, cached: !phase.download });
+        log('load phases:', Object.entries(phase).map(([k, v]) => `${k}=${v}s`).join(' '));
+      }
+      badge.hidden = true;
     }
+    if (cover.hidden && document.visibilityState === 'visible' && performance.now() - lastFresh > 1500) badge.hidden = false;
+    if (!cover.hidden && performance.now() - startT > 30000) $('loading-text').textContent = 'Still loading… if this stays black, reload the page.';
     const now = performance.now();
     if (first && !stalled && now - lastFresh > 30000) { stalled = true; log('stall: no first frame 30 s after start'); }
     if (!first && !stalled && now - lastFresh > 5000 && document.visibilityState === 'visible') {
@@ -409,9 +576,15 @@ let gameStarted = false;
 
 function setupOnline() {
   const name = $('pname');
-  try { name.value = localStorage.getItem('nfs3.name') || ''; } catch {}
-  name.addEventListener('input', () => { try { localStorage.setItem('nfs3.name', name.value.trim()); } catch {} });
-  const myName = () => name.value.trim().slice(0, 16);
+  // a name from the start: the saved one, else a random Player1234 (everyone being "Player"
+  // makes the in-game lists useless)
+  try { name.value = cleanName(localStorage.getItem('nfs3.name')).trim(); } catch {}
+  if (!name.value) { name.value = randomName(); try { localStorage.setItem('nfs3.name', name.value); } catch {} }
+  name.addEventListener('input', () => {
+    const c = cleanName(name.value); if (c !== name.value) name.value = c;
+    try { localStorage.setItem('nfs3.name', name.value.trim()); } catch {}
+  });
+  const myName = () => cleanName(name.value).trim();
   const needName = () => {
     if (myName()) return false;
     message('Enter your name first.'); name.focus(); return true;
@@ -544,6 +717,76 @@ function setupOnline() {
   connect();
 }
 
+// ---------------------------------------------------------------- activity
+// Start page: who is around (/__live on serve.mjs), the most active racers, the daily race,
+// push notifications, and a note when the server has a newer build than this page.
+function setupActivity() {
+  let topWin = '7d', last = null;
+  const fmtIn = (ms) => { const m = Math.round(ms / 60e3); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  function draw(d) {
+    last = d;
+    $('live-line').textContent = d.racing + d.lobby === 0 ? 'Nobody online right now. Open a room and share the link!'
+      : `${d.racing} racing · ${d.lobby} in the lobby · ${d.rooms} open room${d.rooms === 1 ? '' : 's'}`;
+    $('live-line').classList.toggle('on', d.racing + d.lobby > 0);
+    $('live-names').replaceChildren(...d.names.map((p) => el('span', { className: 'ntag' + (p.racing ? ' racing' : ''), textContent: p.n, title: p.racing ? 'racing' : 'in the lobby' })));
+    const rows = d.top?.[topWin] || [];
+    $('top').hidden = !['24h', '7d', 'all'].some((k) => d.top?.[k]?.length);
+    $('top-list').replaceChildren(...(rows.length ? rows.map((r, i) => el('li', {}, el('span', { className: 'r', textContent: i + 1 }), el('span', { className: 'n', textContent: r.n }), el('span', { className: 'f', textContent: r.min >= 60 ? `${Math.floor(r.min / 60)} h ${r.min % 60} min` : `${r.min} min` })))
+      : [el('li', { className: 'muted', textContent: 'No races in this time yet.' })]));
+    if (d.daily) {
+      const until = d.daily.next - Date.now();
+      $('daily').hidden = false;
+      $('daily').replaceChildren(el('b', { textContent: 'Daily race' }), ` every day at ${new Date(d.daily.next).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · `,
+        el('span', { className: until <= 0 ? 'live' : '', textContent: until <= 0 ? 'on now, join a room!' : `starts in ${fmtIn(until)}` }));
+    } else $('daily').hidden = true;
+    if (d.build && buildInfo?.built && d.build !== buildInfo.built) {
+      if ($('update').hidden) log(`a newer build is on the server (${d.build}, this page has ${buildInfo.built})`);
+      $('update').hidden = gameStarted;
+    }
+  }
+  $('top-tabs').onclick = (e) => {
+    const w = e.target.dataset?.w; if (!w) return;
+    topWin = w; for (const b of $('top-tabs').children) b.classList.toggle('on', b === e.target);
+    if (last) draw(last);
+  };
+  $('update-reload').onclick = () => location.reload();
+  const poll = () => fetch('__live', { cache: 'no-store' }).then((r) => r.ok && r.json()).then((d) => d && draw(d)).catch(() => {});
+  poll(); setInterval(() => { if (!gameStarted || Math.random() < 0.25) poll(); }, 15000);
+  setupNotify();
+}
+
+// "Notify me": a push when someone opens a room, and for the daily race (web/push.mjs, sw.js)
+function setupNotify() {
+  const b = $('notify');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) { b.hidden = true; return; }
+  let sub = null;
+  const draw = () => {
+    b.hidden = false;
+    b.disabled = Notification.permission === 'denied';
+    b.textContent = Notification.permission === 'denied' ? 'Notifications are blocked in this browser' : sub ? '🔔 Notifications on (click to turn off)' : '🔔 Notify me when people race';
+    b.classList.toggle('on', !!sub);
+  };
+  const reg = navigator.serviceWorker.register('sw.js').catch(() => null);
+  reg.then((r) => r?.pushManager.getSubscription()).then((s) => { sub = s || null; draw(); });
+  b.onclick = async () => {
+    const r = await reg; if (!r) return;
+    try {
+      if (sub) {
+        await fetch('__push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) });
+        await sub.unsubscribe(); sub = null; track('push', { on: false });
+      } else {
+        const { key } = await (await fetch('__push/key')).json();
+        const raw = Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+        sub = await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: raw });
+        const res = await fetch('__push/subscribe', { method: 'POST', body: JSON.stringify(sub.toJSON()) });
+        if (!res.ok) throw new Error('the server did not take it');
+        track('push', { on: true });
+      }
+    } catch (e) { log('notifications:', e.message); }
+    draw();
+  };
+}
+
 const TIPS = [
   'Hold the handbrake through tight corners to slide around them.',
   'In Hot Pursuit, the police set up roadblocks and spike strips ahead. Watch the radar.',
@@ -563,15 +806,26 @@ async function init() {
   setupLogToggle();
   $('tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
   setupOnline();
+  setupActivity();
   log('page loaded; crossOriginIsolated =', crossOriginIsolated, '; SharedArrayBuffer =', typeof SharedArrayBuffer);
   if (!crossOriginIsolated) {
     status('This page must be served with cross-origin isolation (COOP/COEP headers). Use web/serve.mjs.', true);
     return;
   }
   if (!navigator.storage?.getDirectory) { status('This browser has no Origin Private File System support.', true); return; }
-  try { buildInfo = await (await fetch('dist/build-info.json')).json(); } catch {
+  try { buildInfo = await (await fetch('dist/build-info.json', { cache: 'no-cache' })).json(); } catch {
     status('No recompiled build found in web/dist. Run ./build-web.sh first.', true); return;
   }
+  // rooms only take players of the same build (different builds desync in a race)
+  net.build = `${buildInfo.built || ''}:${(buildInfo.exe_sha256 || '').slice(0, 8)}`;
+  // network worker (net-worker.js): relayed packets bypass the main thread. Off by default until
+  // it has been tried in real races: ?networker=1 turns it on (remembered), ?networker=0 off.
+  try {
+    const q = new URLSearchParams(location.search).get('networker');
+    if (q != null) localStorage.setItem('nfs3.networker', q === '1' ? '1' : '0');
+    net.useWorker = localStorage.getItem('nfs3.networker') === '1';
+  } catch {}
+  log('build', buildInfo.built || '?');
   const refresh = async () => {
     const ok = await hasGame();
     $('pick-label').hidden = ok; $('start').hidden = !ok; $('forget').hidden = !ok;
@@ -590,9 +844,17 @@ async function init() {
   // a server started with --game offers its game folder: import it automatically
   // ?devimport also forces the attempt and reports errors
   const forced = new URLSearchParams(location.search).has('devimport');
-  if (!(await hasGame()) && (forced || await serverHasGame())) {
+  if (await hasGame()) mark('files');
+  const pack = await hasGame() ? null : await packSource();
+  if (pack) {
+    const d0 = performance.now();
+    try { await importPack(pack); track('import', { from: 'pack', secs: (performance.now() - d0) / 1000 }); } catch (err) { status(err.message, true); $('progress').hidden = true; log('game pack:', err.message); track('error', { kind: 'download', msg: err.message }); return; }
+    phase.download = Math.round((performance.now() - d0) / 100) / 10; mark('files');
+  } else if (!(await hasGame()) && (forced || await serverHasGame())) {
     status('Downloading the game files into this browser…');
-    try { await importFolder(await serverFiles()); track('import', { from: 'server' }); } catch (err) { status(err.message, true); return; }
+    const d0 = performance.now();
+    try { await importFolder(await serverFiles()); track('import', { from: 'server', secs: (performance.now() - d0) / 1000 }); } catch (err) { status(err.message, true); return; }
+    phase.download = Math.round((performance.now() - d0) / 100) / 10; mark('files');
   }
   if (new URLSearchParams(location.search).has('autostart') && (await hasGame())) { start().catch((e) => { console.error('Failed to start:', e.stack || e); status('Failed to start: ' + e.message, true); $('setup-wrap').hidden = false; }); }
   $('start').addEventListener('click', () => { if (!earlyAudio) earlyAudio = makeAudioContext(); start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }); });

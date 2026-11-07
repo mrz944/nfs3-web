@@ -1,6 +1,8 @@
 // Local static server for the web build, with the headers shared-memory
 // threads need (cross-origin isolation).
-//   node web/serve.mjs [port] [--game DIR] [--tailscale [httpsPort]] [--funnel [httpsPort]] [--relay-tcp PORT|PATH]
+//   node web/serve.mjs [port] [--game DIR] [--daily HH:MM] [--tailscale [httpsPort]] [--funnel [httpsPort]] [--relay-tcp PORT|PATH]
+// --daily HH:MM: a daily race at that time (server clock): shown on the start page, with push
+// notifications 10 minutes before and at the start.
 // --funnel publishes the page, WebAssembly build and configured game files publicly.
 // Also serves the online lobby/relay (WebSocket /net, relay.mjs); --relay-tcp adds a
 // raw-TCP endpoint on 127.0.0.1 for native test builds (RT_NET=127.0.0.1:PORT).
@@ -9,10 +11,11 @@
 // not enough: browsers allow shared-memory threads and OPFS only on https/localhost.
 import { createServer } from 'node:http';
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, createReadStream, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { appendFileSync, createReadStream, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handleUpgrade, listenRaw, roomStats } from './relay.mjs';
+import { handleUpgrade, listenRaw, liveSummary, onRoomCreated, roomStats, setPlayLog } from './relay.mjs';
+import { createPush, dailyRace } from './push.mjs';
 import { createAnalytics } from './analytics.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
@@ -27,6 +30,8 @@ if (ti >= 0) { tsPort = /^\d+$/.test(args[ti + 1] || '') ? Number(args.splice(ti
 const fi = args.indexOf('--funnel');
 const funnel = fi >= 0;
 if (funnel) { tsPort = /^\d+$/.test(args[fi + 1] || '') ? Number(args.splice(fi, 2)[1]) : (args.splice(fi, 1), 443); }
+const di = args.indexOf('--daily');
+const dailyAt = di >= 0 ? args.splice(di, 2)[1] : '';
 const ri = args.indexOf('--relay-tcp');
 const rawArg = ri >= 0 ? args.splice(ri, 2)[1] : '';
 const rawPort = /^\d+$/.test(rawArg) ? Number(rawArg) : rawArg;   // port or Unix socket path
@@ -74,12 +79,48 @@ setInterval(() => {
 
 // page analytics (analytics.mjs): events in build/analytics/, summary at /__stats
 const analytics = createAnalytics(resolve(root, '..', 'build', 'analytics'));
+const playDir = resolve(root, '..', 'build', 'analytics');
+setPlayLog(playDir);
+
+// push notifications (push.mjs) and the daily race
+const push = createPush(resolve(root, '..', 'build', 'push'));
+onRoomCreated((r) => push.roomOpened(r));
+const daily = dailyAt ? dailyRace(dailyAt, (m) => push.notify(m)) : null;
+if (dailyAt && !daily) { console.error('--daily needs HH:MM'); process.exit(1); }
+
+// start page activity (/__live): who is online now, the most active racers (time spent in
+// online games, from relay.mjs play-*.jsonl), the daily race and the current build
+let topCache = { t: 0, v: null };
+function topRacers() {
+  if (Date.now() - topCache.t < 60e3) return topCache.v;
+  const now = Date.now(), win = { '24h': 864e5, '7d': 7 * 864e5, all: Infinity }, sums = { '24h': new Map(), '7d': new Map(), all: new Map() };
+  try {
+    for (const f of readdirSync(playDir).filter((f) => f.startsWith('play-'))) {
+      for (const line of readFileSync(join(playDir, f), 'utf8').split('\n')) {
+        let r; try { r = JSON.parse(line); } catch { continue; }
+        for (const k in win) if (now - r.t < win[k]) sums[k].set(r.n, (sums[k].get(r.n) || 0) + r.s);
+      }
+    }
+  } catch {}
+  const v = {};
+  for (const k in sums) v[k] = [...sums[k]].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([n, s]) => ({ n, min: Math.round(s / 60) }));
+  topCache = { t: Date.now(), v };
+  return v;
+}
+function live(res) {
+  let build = '';
+  try { build = JSON.parse(readFileSync(join(root, 'dist', 'build-info.json'), 'utf8')).built || ''; } catch {}
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Cross-Origin-Resource-Policy': 'same-origin' });
+  res.end(JSON.stringify({ ...liveSummary(), top: topRacers(), daily: daily ? { next: daily.next(), time: daily.time } : null, build }));
+}
 
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (req.method === 'POST' && url.pathname === '/__event') { analytics.handleEvent(req, res); return; }
   if (url.pathname === '/__stats') { analytics.handleStats(req, res, roomStats); return; }
   if (req.method === 'POST' && url.pathname === '/__log') { clientLog(req, res); return; }
+  if (url.pathname === '/__live') { live(res); return; }
+  if (url.pathname.startsWith('/__push/')) { push.handle(req, res, url.pathname.slice(1)); return; }
   let decoded;
   try { decoded = decodeURIComponent(url.pathname); } catch { res.writeHead(400).end('invalid path'); return; }
   let path = normalize(decoded).replace(/^([/\\])+/, '');
@@ -112,6 +153,7 @@ if (rawPort) listenRaw(rawPort);
 server.listen(port, '127.0.0.1', () => {
   console.log(`NFS3 web runtime: http://localhost:${port}/` + (gameDir ? `  (game folder: ${gameDir}, automatic download)` : ''));
   console.log(`stats:            http://localhost:${port}/__stats`);
+  if (daily) console.log(`daily race:       ${daily.time} (server time), next ${new Date(daily.next()).toString().slice(0, 21)}; ${push.count} push subscriber(s)`);
   if (funnel && ![443, 8443, 10000].includes(tsPort)) { console.error('Funnel only works on ports 443, 8443 and 10000'); process.exit(1); }
   if (tsPort) startTailscale();
 });

@@ -119,6 +119,13 @@ NFS3 Web makes a **room** on the server look like a LAN to the game:
   by the server.
 - The lobby shows each player's ping and recommends the **best host**: the host's car reacts
   instantly, and everyone else waits one round trip to the host.
+- Your lobby name is also your name in the game (up to 10 characters), and a room only takes
+  players on the same build, since different builds would desync in a race.
+- The start page shows who is online and racing, the most active racers, the daily race, and
+  a **Notify me** button (Web Push: when someone opens a room, and for the daily race).
+- `?networker=1` (remembered; `?networker=0` turns it off) moves relayed packets into a Web
+  Worker with its own socket, so they never wait for the page's main thread. Direct WebRTC
+  links stay on the main thread (Chrome can't move them to a worker).
 
 **Racing with friends:**
 
@@ -166,6 +173,10 @@ Open the page, wait for the game files to download, then click **Start Game**.
 Players do not need a local game copy. The first visit downloads about 442 MB; later visits use the browser cache.
 Keyboard controls are the original ones. Click the picture to capture the mouse, and press Esc to release it.
 
+> The game files can also come from Cloudflare R2 or any CDN with CORS instead of your
+> machine: `node tools/pack-game.mjs game` makes a resumable gzip pack (347 MB), and
+> `web/game-source.json` points the page at it. See [R2 hosting](docs/r2.md).
+>
 > Public hosting uses Cloudflare Tunnel: `https://nfs3.xyz` forwards to `http://127.0.0.1:8080`.
 > See [Cloudflare setup](docs/cloudflare.md). Both the game server and `cloudflared` must stay running.
 > The local server binds only to loopback; no inbound router ports are needed.
@@ -177,6 +188,7 @@ Keyboard controls are the original ones. Click the picture to capture the mouse,
 | `--tailscale [port]` | publish over HTTPS on your tailnet (default port 10000), removed again on exit |
 | `--game DIR` | serve this game folder for automatic download into each browser (no folder picker), including through Funnel |
 | `--funnel [port]` | publish the page, game files and `web/dist/` through Tailscale Funnel, open to everyone. Default public port 443 (no port in the URL), forwarding to the local server port; supported ports 443, 8443 or 10000 |
+| `--daily HH:MM` | a daily race at that time (server clock): countdown on the start page, push notifications 10 minutes before and at the start |
 | `--relay-tcp PORT\|PATH` | lobby endpoint for native test builds (`RT_NET=…`) |
 
 The server also collects **page logs** (`build/clientlogs/`) and **cookie-free analytics**

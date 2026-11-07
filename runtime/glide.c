@@ -301,7 +301,7 @@ GL_(QueryResolutions) {
     /* the 4:3 modes a later Voodoo / nGlide offers (the game lists them in its graphics
      * options): 640x480, 800x600, 1024x768, 1280x960, 1600x1200; @60 Hz, 2 color buffers,
      * 1 aux. A template with a set resolution (not GR_QUERY_ANY) narrows the list. */
-    static const uint32_t all[] = { 0x7, 0x8, 0xc };
+    static const uint32_t all[] = { 0x7, 0x8, 0xa, 0xc };   /* 640x480, 800x600, 856x480 (16:9), 1024x768 */
     uint32_t modes[8], nm = 0;
     const char *e = getenv("RT_GLIDE_MODES");     /* e.g. "c" = only 1024x768 (testing) */
     if (e && *e) { for (char *q = (char *)e; *q && nm < 8;) { modes[nm++] = (uint32_t)strtoul(q, &q, 16); while (*q == ',') q++; } }
