@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
 
 /* ---- guest address space layout ----
  * Compact so the same layout fits a wasm32 heap allocation in the browser:
@@ -25,6 +26,12 @@
 
 /* ---- logging ---- */
 extern int rt_verbose;
+/* timed waits and sleeps; RT_TICK_MS=15.625 makes them wake only on such ticks, like a
+ * browser on Windows does (testing) */
+struct timespec;
+extern double rt_tick_ms;
+void rt_tick_round(struct timespec *deadline);
+void rt_usleep(unsigned us);
 void rt_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 _Noreturn void rt_fatal(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 

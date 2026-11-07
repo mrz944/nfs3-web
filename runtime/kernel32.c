@@ -301,6 +301,12 @@ void ev_dump(void) {
     rt_log("last %u events:", n - k);
     for (; k < n; k++) { EvRec *r = &evring[k & 0x3fff]; rt_log("  %10.3f th=%lx %s %#x (%u) from %#x", r->t / 1e9, (unsigned long)r->th, r->what, r->h, r->x, r->from); }
 }
+/* WaitForMultipleObjects sleeps on this until any object changes (a signal wakes it at
+ * once: a short timed poll would cost a whole 15.6 ms timer tick in a browser on Windows) */
+static pthread_mutex_t any_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t any_cv = PTHREAD_COND_INITIALIZER;
+static uint32_t any_gen;
+static void any_changed(void) { pthread_mutex_lock(&any_mu); any_gen++; pthread_cond_broadcast(&any_cv); pthread_mutex_unlock(&any_mu); }
 static Waitable *waitable_new(void) {
     Waitable *w = calloc(1, sizeof *w);
     pthread_mutex_init(&w->mu, NULL); pthread_cond_init(&w->cv, NULL);
@@ -328,6 +334,7 @@ static int wait_one_gen(Waitable *w, uint32_t ms, uint32_t gen0) {
     struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl);
     dl.tv_sec += ms / 1000; dl.tv_nsec += (long)(ms % 1000) * 1000000;
     if (dl.tv_nsec >= 1000000000) { dl.tv_sec++; dl.tv_nsec -= 1000000000; }
+    rt_tick_round(&dl);
     pthread_mutex_lock(&w->mu);
     int ok = 1;
     for (;;) {
@@ -353,11 +360,17 @@ static uint32_t k_WaitForSingleObject(CPU *c, const uint32_t *a) {
 }
 static uint32_t k_WaitForMultipleObjectsEx(CPU *c, const uint32_t *a) {
     uint32_t n = A(0), arr = A(1), all = A(2), ms = A(3);
-    struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
     if (ms == INFINITE) ev(all ? "waitall" : "wait", RD32(arr), n);
     uint32_t gens[64];
     for (uint32_t i = 0; i < n && i < 64; i++) { Waitable *w = get_waitable(RD32(arr + 4 * i)); gens[i] = w ? w->pulse_gen : 0; }
+    struct timespec dl; clock_gettime(CLOCK_REALTIME, &dl);
+    if (ms != INFINITE) {
+        dl.tv_sec += ms / 1000; dl.tv_nsec += (long)(ms % 1000) * 1000000;
+        if (dl.tv_nsec >= 1000000000) { dl.tv_sec++; dl.tv_nsec -= 1000000000; }
+        rt_tick_round(&dl);
+    }
     for (;;) {
+        pthread_mutex_lock(&any_mu); uint32_t gen = any_gen; pthread_mutex_unlock(&any_mu);
         if (!all) {
             for (uint32_t i = 0; i < n; i++) {
                 Waitable *w = get_waitable(RD32(arr + 4 * i));
@@ -380,10 +393,12 @@ static uint32_t k_WaitForMultipleObjectsEx(CPU *c, const uint32_t *a) {
                 return WAIT_OBJECT_0;
             }
         }
-        struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
-        uint64_t el = (uint64_t)(t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
-        if (ms != INFINITE && el >= ms) return WAIT_TIMEOUT;
-        usleep(1000);
+        if (ms == 0) return WAIT_TIMEOUT;
+        pthread_mutex_lock(&any_mu);
+        int r = 0;
+        while (any_gen == gen && r != ETIMEDOUT) r = ms == INFINITE ? pthread_cond_wait(&any_cv, &any_mu) : pthread_cond_timedwait(&any_cv, &any_mu, &dl);
+        pthread_mutex_unlock(&any_mu);
+        if (r == ETIMEDOUT) return WAIT_TIMEOUT;
     }
 }
 static uint32_t k_CreateEventA(CPU *c, const uint32_t *a) {
@@ -400,6 +415,7 @@ static uint32_t set_event(uint32_t h, int sig, int pulse) {
     if (pulse) { w->signaled = 0; w->pulse_gen++; }
     pthread_cond_broadcast(&w->cv);
     pthread_mutex_unlock(&w->mu);
+    if (sig) any_changed();
     return 1;
 }
 static uint32_t k_SetEvent(CPU *c, const uint32_t *a) { return set_event(A(0), 1, 0); }
@@ -458,6 +474,7 @@ static void *thread_main(void *p) {
     uint32_t r = guest_call(c, t->start, 1, t->param);
     rt_log("thread %#x exited (%u)", t->tid, r);
     pthread_mutex_lock(&t->w.mu); t->w.signaled = 1; pthread_cond_broadcast(&t->w.cv); pthread_mutex_unlock(&t->w.mu);
+    any_changed();
     return NULL;
 }
 static uint32_t k_CreateThread(CPU *c, const uint32_t *a) {
@@ -489,7 +506,7 @@ static uint32_t k_GetCurrentThread(CPU *c, const uint32_t *a) { return 0xFFFFFFF
 static uint32_t k_GetCurrentThreadId(CPU *c, const uint32_t *a) { return (uint32_t)(c->fs_base >> 12); }
 static uint32_t k_GetCurrentProcess(CPU *c, const uint32_t *a) { return 0xFFFFFFFFu; }
 static uint32_t k_GetCurrentProcessId(CPU *c, const uint32_t *a) { return 0x42; }
-static uint32_t k_SleepEx(CPU *c, const uint32_t *a) { usleep(A(0) ? A(0) * 1000 : 0); if (!A(0)) sched_yield(); return 0; }
+static uint32_t k_SleepEx(CPU *c, const uint32_t *a) { rt_usleep(A(0) ? A(0) * 1000 : 0); if (!A(0)) sched_yield(); return 0; }
 static uint32_t k_ExitProcess(CPU *c, const uint32_t *a) {
     fprintf(stderr, "[rt] ExitProcess(%u)\n", A(0));
 #ifdef __EMSCRIPTEN__

@@ -217,6 +217,8 @@ bugs much easier to chase than in a browser.
 | `RT_INPUT="ms:KEY,ms:CLICK@x;y,…"` | scripted keyboard and mouse input |
 | `RT_VERBOSE=1..3` · `RT_TRACE=addr,…` | runtime log · trace lifted functions |
 | `RT_PROF=file` | sampling profiler (`tools/prof.py`) |
+| `RT_FPS_LOG=1` | log frames per second |
+| `RT_TICK_MS=15.625` · `RT_HEARTBEAT_US=2900` | timed waits wake only on such ticks (like a browser on Windows) · the audio worklet's heartbeat |
 | `RT_NET=unix:PATH RT_ROOM=… RT_NAME=…` | join an online room natively |
 | `RT_NET_TRACE` · `RT_NET_STATS` · `RT_NET_LOSS=%` | packet trace, per-second stats, simulated loss |
 

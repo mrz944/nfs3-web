@@ -272,7 +272,7 @@ GL_(Get) {
         if (line < 480) {
             /* the driver spins on this: sleep towards the blank instead of burning the CPU */
             double left = (480.0 / 525.0 - ph) / 60.0;
-            if (left > 0.0015) usleep((useconds_t)((left - 0.001) * 1e6));
+            if (left > 0.0015) rt_usleep((useconds_t)((left - 0.001) * 1e6));
             v[0] = line + 1;
         } else v[0] = 0;
         break;

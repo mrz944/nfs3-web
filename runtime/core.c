@@ -6,8 +6,26 @@
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <errno.h>
+#include <math.h>
 
 uint8_t *G;
+double rt_tick_ms;
+void rt_tick_round(struct timespec *dl) {
+    if (rt_tick_ms <= 0) return;
+    double t = (double)dl->tv_sec * 1e3 + dl->tv_nsec / 1e6, tick = rt_tick_ms;
+    t = ceil(t / tick) * tick;
+    dl->tv_sec = (time_t)(t / 1e3); dl->tv_nsec = (long)((t - (double)dl->tv_sec * 1e3) * 1e6);
+    if (dl->tv_nsec >= 1000000000) { dl->tv_sec++; dl->tv_nsec -= 1000000000; }
+}
+void rt_usleep(unsigned us) {
+    if (rt_tick_ms <= 0) { usleep(us); return; }
+    struct timespec dl; clock_gettime(CLOCK_MONOTONIC, &dl);
+    dl.tv_sec += us / 1000000; dl.tv_nsec += (long)(us % 1000000) * 1000;
+    if (dl.tv_nsec >= 1000000000) { dl.tv_sec++; dl.tv_nsec -= 1000000000; }
+    rt_tick_round(&dl);
+    while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &dl, NULL) == EINTR) {}
+}
 int rt_verbose = 1;
 __thread CPU *tls_cpu;
 __thread const char *tls_thunk_name;
@@ -567,6 +585,7 @@ int main(int argc, char **argv) {
 #endif
     if (!dir) { fprintf(stderr, "usage: %s <path to NFS3 folder>\n", argv[0]); return 1; }
     if (getenv("RT_VERBOSE")) rt_verbose = atoi(getenv("RT_VERBOSE"));
+    if (getenv("RT_TICK_MS")) rt_tick_ms = atof(getenv("RT_TICK_MS"));
     snprintf(g_game_dir, sizeof g_game_dir, "%s", dir);
     trace_init();
 #ifndef __EMSCRIPTEN__

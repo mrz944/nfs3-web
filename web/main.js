@@ -443,7 +443,7 @@ async function startAudio(mod) {
   const ctx = a.ctx;
   await a.worklet;
   const node = new AudioWorkletNode(ctx, 'ring-player', { outputChannelCount: [2] });
-  node.port.postMessage({ buffer: mod.HEAPU8.buffer, ptr: mod._rt_web_audio() });
+  node.port.postMessage({ buffer: mod.HEAPU8.buffer, ptr: mod._rt_web_audio(), beat: mod._rt_web_heartbeat() });
   node.port.onmessage = (e) => { const { under, secs } = e.data; if (under > 0.05 * 44100 * secs) log(`audio: ${(under / 441 / secs).toFixed(0)}% silence over ${secs.toFixed(0)} s (game mixed too little)`); };
   node.connect(ctx.destination);
   log('audio context:', ctx.state);
