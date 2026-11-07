@@ -223,6 +223,7 @@ bugs much easier to chase than in a browser.
 | `RT_NET_TRACE` · `RT_NET_STATS` · `RT_NET_LOSS=%` · `RT_NET_DELAY=ms` | packet trace, per-second stats, simulated loss and latency |
 | `RT_NETSYNC=0` · `RT_CARLOG=ms` | online without the smoother play · log the cars' positions |
 | `RT_MEMDUMP=s:n:frames` | guest memory snapshots to `build/mem/` |
+| `tools/audiosim.sh`, then `RT_WAV=f RT_SIM_DRIFT=x build/nfs3sim` | the browser's audio path natively, recorded to a WAV (sound card off by x, e.g. -0.0003); `RT_RESYNC_LOG` logs mixer jumps |
 
 `tools/nettest.sh` runs two headless instances in the same room for multiplayer tests.
 
