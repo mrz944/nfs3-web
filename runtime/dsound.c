@@ -36,9 +36,18 @@ static pthread_mutex_t ds_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec; }
 static DSBuf *buf_of(uint32_t obj) { uint32_t i = RD32(obj + 4); return i < (uint32_t)nbufs ? &bufs[i] : NULL; }
 
+/* Native builds report the position the sound card has mixed up to. In the browser the mixer
+ * thread can be starved for seconds (Safari), and the intro movie and music streaming poll this
+ * position in a tight loop, so there play positions run on wall time like a real sound card and
+ * the mixer follows them (snd_output_mix resyncs), never the other way round. */
+#ifdef __EMSCRIPTEN__
+#define POS_FROM_MIXER 0
+#else
+#define POS_FROM_MIXER g_audio_on
+#endif
 static uint32_t play_pos(DSBuf *b) {
     if (!b->playing || !b->size) return b->pos_at_stop;
-    if (g_audio_on && !b->primary) return ((uint32_t)b->mpos * b->block) % b->size;
+    if (POS_FROM_MIXER && !b->primary) return ((uint32_t)b->mpos * b->block) % b->size;
     uint64_t bytes = (now_ns() - b->start_ns) * b->bytes_per_sec / 1000000000ull;
     if (!b->looping && bytes >= b->size) { b->playing = 0; b->pos_at_stop = 0; return 0; }
     return (uint32_t)(bytes % b->size) / b->block * b->block;
@@ -185,6 +194,19 @@ void snd_output_mix(int16_t *out, int frames) {
         double g = db_gain(b->volume);
         double gl = g * (b->pan > 0 ? db_gain(-b->pan) : 1.0), gr = g * (b->pan < 0 ? db_gain(b->pan) : 1.0);
         double p = b->mpos;
+#ifdef __EMSCRIPTEN__
+        /* keep fixed-rate buffers (movie sound, music streams) on the clock the game sees (it
+         * fills them relative to that position); jump only when more than 60 ms apart */
+        if (b->freq == b->rate || !b->freq) {
+            uint64_t bytes = (now_ns() - b->start_ns) * b->bytes_per_sec / 1000000000ull;
+            if (b->looping || bytes < b->size) {
+                double target = (double)(bytes / b->block);
+                double d = p - target;
+                if (b->looping) { d = fmod(d, (double)nframes); if (d > nframes / 2.0) d -= nframes; if (d < -nframes / 2.0) d += nframes; }
+                if (fabs(d) > 0.06 * b->rate) p = b->looping ? fmod(target, (double)nframes) : target < nframes ? target : nframes - 1;
+            }
+        }
+#endif
         for (int k = 0; k < frames; k++) {
             uint32_t f0 = (uint32_t)p; double t = p - f0; uint32_t f1 = f0 + 1;
             if (f1 >= nframes) f1 = b->looping ? 0 : f0;
@@ -227,36 +249,43 @@ void snd_output_mix(int16_t *out, int frames) {
 typedef struct { volatile uint32_t rd, wr; uint32_t cap, rate; int16_t data[2 * WEB_AUDIO_CAP]; } WebAudio;
 static WebAudio web_audio = {0, 0, WEB_AUDIO_CAP, OUT_RATE};
 EMSCRIPTEN_KEEPALIVE void *rt_web_audio(void) { return &web_audio; }
-/* The game's sound clock (buffer play positions, which the intro movies and
- * streaming wait on) only moves when we mix. If the page isn't draining the
- * ring (AudioContext still suspended by the autoplay policy, worklet not
- * loaded, tab audio blocked), mix on wall-clock time anyway and drop the
- * oldest samples, so the game never waits for a sound card that isn't there. */
+/* The game's play positions run on wall time (play_pos), so nothing here can hold the game up.
+ * This thread keeps the ring ~90 ms ahead of the speakers. If the page isn't draining it
+ * (AudioContext suspended by the autoplay policy, worklet not loaded) it still mixes at wall
+ * rate and drops the oldest samples, and after a late wake-up it mixes what it missed in one go,
+ * so the mixer stays in step with the game. The page reports late wake-ups and drain stalls. */
+#define WEB_AHEAD 4096u
 static void *web_audio_main(void *unused) {
     (void)unused;
     int16_t tmp[2 * 512];
-    uint32_t last_rd = 0; uint64_t rd_moved = now_ns(), wall_mixed = 0, wall_t0 = 0;
+    uint64_t t0 = now_ns(), mixed = 0, late_max = 0, last = t0, stat_t = t0; unsigned drops = 0, lates = 0;
     for (;;) {
-        uint32_t rd = __atomic_load_n(&web_audio.rd, __ATOMIC_ACQUIRE), wr = web_audio.wr;
         uint64_t t = now_ns();
-        if (rd != last_rd) { last_rd = rd; rd_moved = t; wall_t0 = 0; }
-        else if (wr - rd >= 4096 && t - rd_moved > 100000000ull) {     /* not drained for 100 ms */
-            if (!wall_t0) { wall_t0 = t; wall_mixed = 0; rt_log("audio: output not playing, sound clock runs on wall time"); }
-            if ((t - wall_t0) * OUT_RATE / 1000000000ull >= wall_mixed + 512) {
-                uint32_t nrd = wr + 512 - 4096;                      /* drop the oldest 512 frames */
-                __atomic_compare_exchange_n(&web_audio.rd, &rd, nrd, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
-                last_rd = rd = __atomic_load_n(&web_audio.rd, __ATOMIC_ACQUIRE);
-                wall_mixed += 512;
+        if (t - last > late_max) late_max = t - last;
+        if (t - last > 50000000ull) lates++;
+        last = t;
+        uint64_t due = (t - t0) * OUT_RATE / 1000000000ull;           /* frames the wall clock asks for */
+        if (due > mixed + OUT_RATE) mixed = due - OUT_RATE;            /* more than 1 s behind: let it go */
+        for (int burst = 0; burst < 128; burst++) {
+            uint32_t rd = __atomic_load_n(&web_audio.rd, __ATOMIC_ACQUIRE), wr = web_audio.wr;
+            int need = wr - rd < WEB_AHEAD || mixed + 512 <= due;      /* speakers or wall clock */
+            if (!need) break;
+            while (wr + 512 - rd > 2 * WEB_AHEAD) {                     /* not drained: drop the oldest */
+                if (__atomic_compare_exchange_n(&web_audio.rd, &rd, wr + 512 - 2 * WEB_AHEAD, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) { drops++; break; }
             }
-        }
-        if (wr - rd < 4096) {
             snd_output_mix(tmp, 512);
             for (int k = 0; k < 512; k++) {
                 uint32_t i = (wr + (uint32_t)k) & (WEB_AUDIO_CAP - 1);
                 web_audio.data[2 * i] = tmp[2 * k]; web_audio.data[2 * i + 1] = tmp[2 * k + 1];
             }
             __atomic_store_n(&web_audio.wr, wr + 512, __ATOMIC_RELEASE);
-        } else usleep(2000);
+            mixed += 512;
+        }
+        if (t - stat_t > 10000000000ull) {                             /* every 10 s, only if something was off */
+            if (lates || drops) rt_log("audio: thread woke late %u times (worst %.0f ms), %u drops of 512 frames (output not draining)", lates, late_max / 1e6, drops);
+            lates = drops = 0; late_max = 0; stat_t = t;
+        }
+        usleep(2000);
     }
     return NULL;
 }
