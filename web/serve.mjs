@@ -10,6 +10,7 @@
 // tailnet only) and removes that again on exit. Plain http://<tailscale ip> is
 // not enough: browsers allow shared-memory threads and OPFS only on https/localhost.
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, createReadStream, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
@@ -77,6 +78,26 @@ setInterval(() => {
   }
 }, 5000).unref();
 
+// Versioned script URLs. Cloudflare gives .js files its own browser cache time (4 h by default,
+// whatever we send), so a browser could keep yesterday's nfs3.js and pair it with today's
+// nfs3.wasm, which crashes at the first frame. So every script address the page uses carries
+// ?v=<build>: index.html and our .js files are rewritten on the way out, and a new build means
+// new addresses. Inside dist/nfs3.js the same goes for "nfs3.js" (its game threads load it
+// again) and "nfs3.wasm". sw.js keeps a fixed address (a service worker is identified by it).
+const SCRIPTS = ['main.js', 'net.js', 'net-worker.js', 'audio-worklet.js', 'dist/nfs3.js'];
+let verCache = { t: 0, v: '' };
+function version() {
+  if (Date.now() - verCache.t < 2000) return verCache.v;
+  const h = createHash('sha256');
+  for (const f of [...SCRIPTS, 'index.html', 'dist/nfs3.wasm', 'dist/build-info.json']) { try { const st = statSync(join(root, f)); h.update(`${f}:${st.size}:${st.mtimeMs}`); } catch {} }
+  verCache = { t: Date.now(), v: h.digest('hex').slice(0, 10) };
+  return verCache.v;
+}
+function versioned(text) {
+  const v = version();
+  return text.replace(/(["'])(\.\/)?(main\.js|net\.js|net-worker\.js|audio-worklet\.js|dist\/nfs3\.js|nfs3\.js|nfs3\.wasm)\1/g, (m, q, dot, f) => `${q}${dot || ''}${f}?v=${v}${q}`);
+}
+
 // page analytics (analytics.mjs): events in build/analytics/, summary at /__stats
 const analytics = createAnalytics(resolve(root, '..', 'build', 'analytics'));
 const playDir = resolve(root, '..', 'build', 'analytics');
@@ -136,15 +157,19 @@ const server = createServer((req, res) => {
   let st;
   try { st = statSync(file); } catch { res.writeHead(404).end('not found'); return; }
   if (st.isDirectory()) { res.writeHead(404).end(); return; }
+  // the page and our own scripts: script addresses get ?v=<build> (see versioned())
+  const rewrite = base === root && (path === 'index.html' || SCRIPTS.includes(path));
+  const body = rewrite ? Buffer.from(versioned(readFileSync(file, 'utf8'))) : null;
   res.writeHead(200, {
     'Content-Type': types[extname(file)] || 'application/octet-stream',
-    'Content-Length': st.size,
+    'Content-Length': body ? body.length : st.size,
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Cross-Origin-Embedder-Policy': 'require-corp',
     'Cross-Origin-Resource-Policy': 'same-origin',
     'Cache-Control': 'no-cache',
   });
   if (req.method === 'HEAD') { res.end(); return; }
+  if (rewrite) { res.end(body); return; }
   createReadStream(file).on('error', () => res.destroy()).pipe(res);
 });
 // online play: WebSocket lobby/relay at /net (see relay.mjs)
