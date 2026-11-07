@@ -6,6 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <strings.h>
 #include <errno.h>
 #include <math.h>
 
@@ -500,6 +501,8 @@ uint32_t load_pe_at(const char *path, uint32_t *entry_out, uint32_t want_base) {
     }
     free(buf);
     rt_log("loaded %s at %#x (%#x bytes)", path, base, size);
+    { extern void glide_patch_driver(uint32_t, uint32_t); const char *s = strrchr(path, '/');
+      if (s && !strcasecmp(s + 1, "voodoo2a.dll")) glide_patch_driver(base, size); }
     return base;
 }
 

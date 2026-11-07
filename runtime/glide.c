@@ -296,16 +296,49 @@ GL_(GetString) {
     if (!s[i]) s[i] = guest_str(txt[i]);
     return s[i];
 }
+/* Modes by GR_RESOLUTION_* code. Glide's own list stops at 4:3 and a few odd sizes (no
+ * 1920x1080), so the codes nobody uses now carry widescreen modes. The game learns the
+ * sizes from a table in the 3dfx driver (voodoo2a.dll), which glide_patch_driver() rewrites
+ * to match when the driver loads. 640x480, 800x600, 856x480 and 1024x768 keep their codes
+ * (configs saved before still pick the same mode). 0 = not offered. Nothing wider than
+ * 16:9: the game (like the Modern Patch says, 5:4 to 16:9) never finishes loading a race
+ * in such a mode; the page letterboxes 16:9 on an ultrawide screen instead. */
+#define NRES 24
+static int res_w[NRES] = {
+    1280, 1366, 1600, 1920, 2560, 3840, 1280,  640,  800, 1440,  856, 1680,
+    1024, 1280, 1600, 1920, 1152, 1280, 2560,    0,    0, 1920, 2048,    0 };
+static int res_h[NRES] = {
+     720,  768,  900, 1080, 1440, 2160,  800,  480,  600,  900,  480, 1050,
+     768, 1024, 1200, 1200,  864,  960, 1600,    0,    0, 1440, 1536,    0 };
+void glide_patch_driver(uint32_t base, uint32_t size) {
+    /* the driver's table: (u16 w, u16 h) for codes 0..23, Glide's standard sizes */
+    static const uint16_t orig[] = { 320, 200, 320, 240, 400, 256, 512, 384, 640, 200, 640, 350, 640, 400, 640, 480 };
+    for (uint32_t o = 0; o + NRES * 4 <= size; o += 2) {
+        if (memcmp(G + base + o, orig, sizeof orig)) continue;
+        for (int i = 0; i < NRES; i++) { WR16(base + o + 4 * i, (uint16_t)res_w[i]); WR16(base + o + 4 * i + 2, (uint16_t)res_h[i]); }
+        rt_log("glide: driver mode table at %#x now has the widescreen modes", base + o);
+        return;
+    }
+}
 GL_(QueryResolutions) {
     (void)c;
-    /* the 4:3 modes a later Voodoo / nGlide offers (the game lists them in its graphics
-     * options): 640x480, 800x600, 1024x768, 1280x960, 1600x1200; @60 Hz, 2 color buffers,
-     * 1 aux. A template with a set resolution (not GR_QUERY_ANY) narrows the list. */
-    static const uint32_t all[] = { 0x7, 0x8, 0xa, 0xc };   /* 640x480, 800x600, 856x480 (16:9), 1024x768 */
-    uint32_t modes[8], nm = 0;
+    /* every mode in res_w/res_h (see there) @60 Hz, 2 color buffers, 1 aux; the game sorts
+     * them for its graphics options. A template with a set resolution (not GR_QUERY_ANY)
+     * narrows the list. */
+    uint32_t modes[32], nm = 0;
     const char *e = getenv("RT_GLIDE_MODES");     /* e.g. "c" = only 1024x768 (testing) */
-    if (e && *e) { for (char *q = (char *)e; *q && nm < 8;) { modes[nm++] = (uint32_t)strtoul(q, &q, 16); while (*q == ',') q++; } }
-    else for (unsigned i = 0; i < sizeof all / sizeof *all; i++) modes[nm++] = all[i];
+    if (e && *e) { for (char *q = (char *)e; *q && nm < 32;) { modes[nm++] = (uint32_t)strtoul(q, &q, 16); while (*q == ',') q++; } }
+    else {
+        /* RT_SCREEN=WxH (the page passes the screen's pixels): like a PC offering only what its
+         * monitor shows, hide modes bigger than that (the game starts in the biggest one) */
+        int sw = 0, sh = 0; const char *s = getenv("RT_SCREEN");
+        if (s) sscanf(s, "%dx%d", &sw, &sh);
+        for (uint32_t i = 0; i < NRES; i++) {
+            if (!res_w[i]) continue;
+            int fits = sw <= 0 || (res_w[i] <= sw && res_h[i] <= sh) || res_w[i] <= 800;
+            if (fits) modes[nm++] = i;
+        }
+    }
     uint32_t want = A(0) ? RD32(A(0)) : 0xFFFFFFFFu, n = 0;
     if (want > 0x17) want = 0xFFFFFFFFu;          /* not a GR_RESOLUTION_* code: list all */
     for (unsigned i = 0; i < nm; i++) {
@@ -316,12 +349,10 @@ GL_(QueryResolutions) {
     static int logged; if (logged++ < 40) rt_log("grQueryResolutions(want %#x): %u mode(s)", want, n);
     return (int)(n * 16);
 }
-static const int res_w[] = { 320, 320, 400, 512, 640, 640, 640, 640, 800, 960, 856, 512, 1024, 1280, 1600, 400, 1152, 1280, 1600, 1792, 1856, 1920, 2048, 2048 };
-static const int res_h[] = { 200, 240, 256, 384, 200, 350, 400, 480, 600, 720, 480, 256, 768, 1024, 1200, 300, 864, 960, 1024, 1344, 1392, 1440, 1536, 2048 };
 GL_(SstWinOpen) {
     (void)c;
     uint32_t res = A(1);
-    if (res < sizeof res_w / sizeof *res_w) { win_w = res_w[res]; win_h = res_h[res]; }
+    if (res < NRES && res_w[res]) { win_w = res_w[res]; win_h = res_h[res]; }
     color_format = (int)A(3); origin_lower = A(4) == 1;
     st.clip[0] = 0; st.clip[1] = 0; st.clip[2] = (int16_t)win_w; st.clip[3] = (int16_t)win_h;
     rt_log("grSstWinOpen(res=%#x -> %dx%d, colorfmt=%u, origin=%u, bufs=%u/%u)", res, win_w, win_h, A(3), A(4), A(5), A(6));
@@ -508,12 +539,15 @@ GL_(TexSource) {
  * on unlock they're sent to the renderer as an overlay (unwritten pixels stay
  * transparent: the buffer is pre-filled with a key the game never writes). */
 #define LFB_KEY 0xF81Fu   /* RGB565 magenta with the low green bit clear */
-static uint32_t lfb_buf; static int lfb_locked, lfb_stride;
+static uint32_t lfb_buf, lfb_cap; static int lfb_locked, lfb_stride;
 GL_(LfbLock) {
     (void)c;
     uint32_t type = A(0) & 1, info = A(5);
     lfb_stride = win_w * 2;
-    if (!lfb_buf) lfb_buf = galloc((uint32_t)(win_w * win_h * 4));
+    if (lfb_cap < (uint32_t)(win_w * win_h * 2)) {   /* grows with the mode */
+        if (lfb_buf) gfree(lfb_buf);
+        lfb_cap = (uint32_t)(win_w * win_h * 2); lfb_buf = galloc(lfb_cap);
+    }
     if (type == 1) {           /* write-only */
         uint16_t *p = (uint16_t *)(G + lfb_buf);
         for (int i = 0; i < win_w * win_h; i++) p[i] = LFB_KEY;
