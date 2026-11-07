@@ -260,14 +260,18 @@ async function writeGameName(name) {
 async function fileBytes(dir, name) { try { return new Uint8Array(await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer()); } catch { return null; } }
 async function writeBytes(dir, name, bytes) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(exact(bytes)); await w.close(); }
 
-// the browser build renders through the Voodoo2 (Glide) driver -> WebGL2
-const patchIni = (t) => t.replace(/^ThrashDriver\s*=.*$/mi, 'ThrashDriver=glide3x');
+// The browser build renders through the Voodoo2 (Glide) driver -> WebGL2, and skips the FMVs
+// (intro, menu attract demos): the game's movie streamer races its file reader thread and on
+// multi-core machines can wait forever for the first frame (about 1 start in 4 natively, nearly
+// every start in Safari). NoMovies is the modern patch's own switch for this.
+const iniSet = (t, key, val) => (new RegExp(`^${key}\\s*=.*$`, 'mi').test(t) ? t.replace(new RegExp(`^${key}\\s*=.*$`, 'mi'), `${key}=${val}`) : t);
+const patchIni = (t) => iniSet(iniSet(t, 'ThrashDriver', 'glide3x'), 'NoMovies', '1');
 async function ensureIni() {
   try {
     const d = await gameDir();
     const fh = await d.getFileHandle('nfs3.ini');
     const t = await (await fh.getFile()).text(), u = patchIni(t);
-    if (u !== t) { const w = await fh.createWritable(); await w.write(u); await w.close(); log('nfs3.ini: ThrashDriver=glide3x'); }
+    if (u !== t) { const w = await fh.createWritable(); await w.write(u); await w.close(); log('nfs3.ini: ThrashDriver=glide3x, NoMovies=1'); }
   } catch (e) { log('nfs3.ini not patched:', e.message); }
 }
 
