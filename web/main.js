@@ -340,6 +340,36 @@ for (let i = 1; i <= 12; i++) CODE_TO_KEY['F' + i] = 'F' + i;
 for (let c = 65; c <= 90; c++) CODE_TO_KEY['Key' + String.fromCharCode(c)] = String.fromCharCode(c);
 for (let d = 0; d <= 9; d++) CODE_TO_KEY['Digit' + d] = String(d);
 
+// ------------------------------------------------------------- fullscreen
+// The whole page goes fullscreen (the game, the fps and online badges stay on top). In Chrome the
+// keyboard lock keeps Esc for the game while fullscreen (hold Esc to leave); elsewhere Esc leaves.
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+const fsSupported = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+async function toggleFullscreen() {
+  try {
+    if (fsElement()) { await (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+    const el = document.documentElement;
+    await (el.requestFullscreen ? el.requestFullscreen({ navigationUI: 'hide' }) : el.webkitRequestFullscreen());
+  } catch (e) { log('fullscreen:', e.message || e); }
+}
+function setupFullscreen() {
+  const b = $('fullscreen');
+  if (!fsSupported()) return;                 // iPhone Safari: only videos can go fullscreen
+  b.hidden = false;
+  b.addEventListener('click', (ev) => { ev.stopPropagation(); b.blur(); toggleFullscreen(); });
+  const changed = () => {
+    const on = !!fsElement();
+    b.title = on ? 'Exit fullscreen (Alt+Enter)' : 'Fullscreen (Alt+Enter)';
+    b.setAttribute('aria-label', b.title);
+    document.body.classList.toggle('fs', on);
+    const kb = on && navigator.keyboard?.lock;
+    if (kb) navigator.keyboard.lock(['Escape']).catch(() => {}); else navigator.keyboard?.unlock?.();
+    $('hint').textContent = 'Click to capture the mouse · ' + (kb ? 'hold Esc to leave fullscreen' : on ? 'Esc releases it and leaves fullscreen' : 'Esc releases it · Alt+Enter fullscreen');
+  };
+  document.addEventListener('fullscreenchange', changed);
+  document.addEventListener('webkitfullscreenchange', changed);
+}
+
 function attachInput(mod, canvas) {
   const base = mod._rt_web_input();
   const QN = 1024;
@@ -364,6 +394,12 @@ function attachInput(mod, canvas) {
     if (down) held.add(ev.code); else held.delete(ev.code);
     push(1, idx, down ? 1 : 0);
   };
+  // Alt+Enter toggles fullscreen; the game never sees that Enter (down or up)
+  let fsEnter = false;
+  window.addEventListener('keydown', (ev) => {
+    if (ev.code === 'Enter' && ev.altKey) { ev.preventDefault(); ev.stopImmediatePropagation(); if (!ev.repeat) { fsEnter = true; toggleFullscreen(); } }
+  }, true);
+  window.addEventListener('keyup', (ev) => { if (ev.code === 'Enter' && fsEnter) { fsEnter = false; ev.preventDefault(); ev.stopImmediatePropagation(); } }, true);
   window.addEventListener('keydown', onKey(true));
   window.addEventListener('keyup', onKey(false));
   window.addEventListener('blur', () => { for (const c of held) push(1, keyIndex[c], 0); held.clear(); });
@@ -371,7 +407,10 @@ function attachInput(mod, canvas) {
   // the game's cursor is relative (DirectInput): pointer lock gives clean deltas
   const acc = { x: 0, y: 0 };
   canvas.addEventListener('click', () => { if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.(); });
-  document.addEventListener('pointerlockchange', () => { $('hint').hidden = document.pointerLockElement === canvas; });
+  document.addEventListener('pointerlockchange', () => {
+    const locked = document.pointerLockElement === canvas;
+    $('hint').hidden = locked; document.body.classList.toggle('locked', locked);
+  });
   canvas.addEventListener('mousemove', (ev) => {
     if (document.pointerLockElement !== canvas) return;
     // send deltas in 640x480 game coordinates (the runtime applies the game's sensitivity correction)
@@ -472,6 +511,7 @@ async function start() {
   $('setup-wrap').hidden = true; $('bg').hidden = true;
   $('screen').style.display = 'block';
   $('hint').hidden = false;
+  setupFullscreen();
   // Loading cover: up until the game has really drawn a few frames (the first ones are an
   // empty screen), then a small "Loading…" badge whenever no new frame comes for 1.5 s
   // (the game loading a track, or stuck). This is the page's own text, never the game's.

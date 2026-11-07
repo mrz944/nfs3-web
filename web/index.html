@@ -217,6 +217,14 @@
   canvas { width: 100%; height: 100%; display: block; image-rendering: auto; }
   #fps { position: fixed; z-index: 3; right: 10px; bottom: 8px; color: #fff9; font: 11px ui-monospace, monospace; pointer-events: none; }
   #hint { position: fixed; z-index: 3; left: 12px; bottom: 8px; color: #fff8; font-size: 11px; pointer-events: none; }
+  #fullscreen { position: fixed; z-index: 4; right: 8px; top: 8px; width: 34px; height: 34px; display: grid; place-items: center; padding: 0;
+    background: rgba(0, 0, 0, .35); border: 1px solid #fff3; border-radius: 4px; color: #fffc; cursor: pointer; opacity: .55; transition: opacity .15s; }
+  #fullscreen:hover, #fullscreen:focus-visible { opacity: 1; }
+  #fullscreen[hidden] { display: none; }
+  #fullscreen svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  #fullscreen .fs-off, body.fs #fullscreen .fs-on { display: none; }
+  body.fs #fullscreen .fs-off { display: inline; }
+  body.locked #fullscreen { opacity: 0; pointer-events: none; }
   #netbadge { position: fixed; left: 10px; top: 8px; z-index: 4; background: linear-gradient(180deg, rgba(36, 56, 160, .85), rgba(10, 20, 80, .85)); color: #fff;
     border-radius: 12px 3px 3px 12px; border-left: 3px solid var(--gold); padding: 4px 12px; font: bold 11px var(--ui); cursor: pointer; max-width: 70vw; text-shadow: 0 1px 0 #000; }
   #log { margin-top: 12px; max-height: 220px; overflow: auto; background: rgba(0, 0, 20, .7); border: 1px solid #23307a; padding: 8px;
@@ -462,7 +470,8 @@
 <div id="screen"><canvas id="canvas" width="640" height="480"></canvas></div>
 <div id="fps" hidden></div>
 <div id="netbadge" hidden title="Click to copy the room link"></div>
-<div id="hint" hidden>Click to capture the mouse · Esc releases it</div>
+<button id="fullscreen" type="button" hidden title="Fullscreen (Alt+Enter)" aria-label="Fullscreen"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path class="fs-on" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /><path class="fs-off" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" /></svg></button>
+<div id="hint" hidden>Click to capture the mouse · Esc releases it · Alt+Enter fullscreen</div>
 <div id="loading" hidden><div><div class="ltitle">Need for Speed III</div><div id="loading-text">Loading the game…</div><div class="lbar"><i></i></div></div></div>
 <div id="loadbadge" hidden>Loading…</div>
 <script type="module" src="main.js"></script>
