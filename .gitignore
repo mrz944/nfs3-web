@@ -14,3 +14,4 @@ deps/
 __pycache__/
 *.pyc
 web/game-source.json
+web/mods/

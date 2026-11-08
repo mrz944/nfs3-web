@@ -55,7 +55,7 @@
   [hidden] { display: none !important; }
   html, body { margin: 0; min-height: 100%; background: var(--night); color: var(--text); font: 13px/1.55 var(--ui); }
   /* the pixel font stays crisp: no smoothing on anything set in it */
-  .mbtn, button, label.btn, .panel > .ph h2, .tip b, .maker b, .specs dt, h3.minor, .bar h3, .pill, #online label, #rooms th, .tag, .ticker, footer,
+  .mbtn, button, label.btn, .panel > .ph h2, .tip b, .maker b, .specs dt, h3.minor, .bar h3, .pill, #online label, #rooms th, .opt b, .opt output, .tag, .ticker, footer,
   .badge, .counter i, #fps, #hint, #netbadge, #loading, #loadbadge, .steps li::before, #top-list .r { -webkit-font-smoothing: none; -moz-osx-font-smoothing: unset; font-smooth: never; }
   a { color: var(--sky); }
   ::selection { background: var(--gold); color: var(--ink); }
@@ -204,6 +204,22 @@
   .counter { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
   .counter i { font: 700 16px/1 var(--px); font-style: normal; background: #000; color: #ff3b1f; padding: 2px 3px; box-shadow: inset 0 0 0 1px #3a0a04; }
 
+  /* ------------------------------------------------------- settings, mods */
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; margin-top: 8px; }
+  @media (max-width: 600px) { .opts { grid-template-columns: 1fr; } }
+  .opt { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; padding: 7px 8px; cursor: pointer; background: rgba(1, 6, 36, .55); box-shadow: inset 2px 0 0 #2c3c94; }
+  .opt:hover { box-shadow: inset 2px 0 0 var(--gold); }
+  .opt b { display: block; color: #fff; font: 700 16px/1.25 var(--px); text-transform: uppercase; }
+  .opt i { display: block; font-style: normal; color: var(--muted); font-size: 11px; line-height: 1.4; }
+  .opt.sel { grid-template-columns: 1fr; cursor: default; }
+  .opt input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 18px; height: 18px; margin: 1px 0 0; background: #010624; cursor: pointer;
+    box-shadow: inset 2px 2px 0 #000, inset -2px -2px 0 #34489c; }
+  .opt input[type=checkbox]:checked { background: linear-gradient(var(--gold), var(--gold)) 5px 5px / 8px 8px no-repeat, #010624; }
+  .opt select { background: #010624; color: var(--text); border: 0; border-radius: 0; padding: 5px 7px; font: 13px var(--ui); width: 100%; box-shadow: inset 2px 2px 0 #000, inset -2px -2px 0 #34489c; }
+  .opt .range { display: flex; align-items: center; gap: 10px; } .opt input[type=range] { flex: 1; accent-color: var(--gold); } .opt output { min-width: 3.2em; color: var(--gold); font: 700 16px var(--px); }
+  .modsmall { font-size: 11px; color: var(--muted); } .modsmall b { color: #fff; }
+  #mods .opt { margin-top: 6px; } #mods-line { margin: 8px 0 0; font-weight: bold; } #mods-line.err { color: var(--err); }
+
   /* -------------------------------------------------------------- in game */
   #screen { display: none; position: fixed; inset: 0; z-index: 2; width: 100vw; height: 100vh; background: #000; }
   canvas#canvas { width: 100%; height: 100%; display: block; image-rendering: auto; }
@@ -269,6 +285,8 @@
       <button id="start" class="mbtn go" hidden>Start Game</button>
       <label class="btn mbtn" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
       <a class="mbtn" href="#online">Online Play…</a>
+      <a class="mbtn" href="#settings">Settings…</a>
+      <a class="mbtn" href="#mods">Mods…</a>
       <a class="mbtn" href="#guide">How to Race…</a>
       <a class="mbtn" href="#work">What We Built…</a>
       <a class="mbtn" href="#about">Read Me…</a>
@@ -358,6 +376,43 @@
         </div>
       </section>
 
+      <section class="panel" id="settings">
+        <div class="ph"><h2>Game Settings</h2><button id="set-reset" class="small secondary" title="Back to the default settings">Defaults</button></div>
+        <div class="pb">
+          <p class="muted">Used every time you click <b>Start Game</b>, saved in this browser. Car, controls, sound and detail are in the game's own Options menu.</p>
+          <div class="opts">
+            <label class="opt"><input type="checkbox" data-set="fullscreen"><span><b>Start in fullscreen</b><i>Alt+Enter switches during the game.</i></span></label>
+            <label class="opt"><input type="checkbox" data-set="fps"><span><b>FPS counter</b><i>Frames per second, bottom right.</i></span></label>
+            <label class="opt"><input type="checkbox" data-set="movies"><span><b>Intro movies</b><i>The EA intro and the menu demos. Off by default: in some browsers they can stall the start.</i></span></label>
+            <label class="opt"><input type="checkbox" data-set="unlock"><span><b>Everything unlocked</b><i>Bonus cars and Empire City from the first race. Once the game has saved them, they stay.</i></span></label>
+            <label class="opt"><input type="checkbox" data-set="pads"><span><b>Gamepads and wheels</b><i>Off keeps the keyboard as player 1 with a controller plugged in.</i></span></label>
+            <label class="opt sel"><b>Resolutions</b><select data-set="screen">
+              <option value="auto" id="set-screen-auto">Up to this screen</option>
+              <option value="1280x720">Up to 1280×720</option><option value="1600x900">Up to 1600×900</option>
+              <option value="1920x1080">Up to 1920×1080</option><option value="2560x1440">Up to 2560×1440</option><option value="3840x2160">Up to 3840×2160</option>
+            </select><i>What the game offers in Options › Graphics. Lower is faster on weak GPUs.</i></label>
+            <label class="opt sel"><b>Sharpness</b><select data-set="quality">
+              <option value="auto">Auto</option><option value="1">Fast (1×)</option><option value="2">Balanced (2×)</option><option value="3">Sharp (3×)</option><option value="4">Sharpest (4×)</option>
+            </select><i>How many times the game picture is rendered over before it's scaled to the screen. Auto lowers it when the GPU falls behind.</i></label>
+            <label class="opt sel"><b>Volume</b><span class="range"><input type="range" min="0" max="100" step="5" data-set="volume"><output id="set-volume-out">100%</output></span><i>On top of the game's own sound settings.</i></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="mods">
+        <div class="ph"><h2>Mods</h2><span id="mods-count" class="pill">off</span></div>
+        <div class="pb">
+          <label class="opt"><input type="checkbox" id="mods-on"><span><b>rata_536's remastered cars</b><i>Every car in the game
+            rebuilt in higher quality: new models and textures, new sounds, real colours and gearing that no longer skips shifts, plus
+            the police and traffic cars and PSX-style loading slides. A few cars also handle closer to the real thing.</i></span></label>
+          <p id="mods-line" class="muted"></p>
+          <progress id="mods-bar" max="1" value="0" hidden></progress>
+          <p class="modsmall"><b>Included:</b> <span id="mods-list"></span></p>
+          <p class="modsmall">Made by <a href="https://www.nfsaddons.com/downloads/all/all/author:rata-536/" target="_blank" rel="noopener">rata_536</a>
+            (their mods on NFSAddons). Racing online? Everyone in the race should have the same setting.</p>
+        </div>
+      </section>
+
       <section class="panel" id="guide">
         <div class="ph"><h2>How to Race Online</h2></div>
         <div class="pb">
@@ -380,7 +435,7 @@
             <dt>Via server</dt><dd>If two browsers can't connect directly (strict routers), packets go through this server instead. It works, just a little slower.</dd>
             <dt>Keep it visible</dt><dd>Leave every game window open while racing. A minimised tab can fall behind.</dd>
             <dt>Names</dt><dd>The name inside the game's own lobby is the game's <i>Player 1 Name</i> setting. Change it there to match.</dd>
-            <dt>Controllers</dt><dd>Gamepads and wheels work. Press a button on yours before <i>Start Game</i> (the browser only shows it after a press), then set it up in <b>Options → Controllers</b>. On a pad the triggers are gas and brake and Start pauses.</dd>
+            <dt>Controllers</dt><dd>Gamepads and wheels work: turn them on in <i>Game Settings</i>, press a button on yours before <i>Start Game</i> (the browser only shows it after a press), then set it up in <b>Options → Controllers</b>. On a pad the triggers are gas and brake and Start pauses.</dd>
           </dl>
         </div>
       </section>

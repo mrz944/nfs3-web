@@ -1,0 +1,518 @@
+{
+ "sets": {
+  "rata536": {
+   "title": "rata_536's remastered cars",
+   "author": "rata_536",
+   "about": "Every car of the game rebuilt in higher quality, with new sounds, real colours and fixed gearing, plus the police and traffic cars and PSX-style loading slides. Same cars and tracks, they just look and sound much better.",
+   "include": [
+    6648,
+    7513,
+    6245,
+    6767,
+    6706,
+    6711,
+    6818,
+    6705,
+    6744,
+    6966,
+    7867,
+    6707,
+    7430,
+    7125,
+    7498,
+    7320,
+    6736,
+    7309,
+    7864,
+    8059,
+    8793
+   ]
+  }
+ },
+ "authors": {
+  "rata_536": {
+   "name": "rata_536",
+   "url": "https://www.nfsaddons.com/downloads/all/all/author:rata-536/",
+   "about": "remade every car of the PC game in higher quality, plus the police, the traffic and more."
+  }
+ },
+ "kinds": {
+  "car": "Cars",
+  "police": "Police",
+  "traffic": "Traffic",
+  "extra": "Extras"
+ },
+ "mods": [
+  {
+   "id": 7513,
+   "title": "El Niño",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/exoticrides/7513/el-nino.html",
+   "size": "2.74 MB",
+   "updated": "2022-11-04",
+   "rating": 9.8,
+   "replaces": "El Niño and Pursuit El Niño",
+   "about": "The bonus car rebuilt much closer to the PSX version, with its pursuit version, PSX-style loading slides and sharper cornering.",
+   "check": [
+    "gamedata/carmodel/elni/car.viv"
+   ]
+  },
+  {
+   "id": 6245,
+   "title": "Ferrari 355 F1 Spider",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/ferrari/6245/ferrari-355-f1-spider.html",
+   "size": "2.04 MB",
+   "updated": "2025-04-13",
+   "rating": 10,
+   "replaces": "the 355 F1",
+   "about": "A new model with sharper textures, engine sound from real car samples and gearing that no longer skips shifts.",
+   "check": [
+    "gamedata/carmodel/f355/car.viv"
+   ]
+  },
+  {
+   "id": 6767,
+   "title": "Mercedes-Benz CLK-GTR",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/mercedes-benz/6767/mercedes-benz-clk-gtr.html",
+   "size": "6.24 MB",
+   "updated": "2025-05-14",
+   "rating": 9.6,
+   "replaces": "the CLK-GTR",
+   "about": "A new model, cleaner sounds from NFS: High Stakes on the PSX, and performance checked against the real car.",
+   "check": [
+    "gamedata/carmodel/merc/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "Standard",
+     "keep": "standard/"
+    },
+    {
+     "label": "D2 Privat race livery",
+     "keep": "race/"
+    }
+   ]
+  },
+  {
+   "id": 6706,
+   "title": "Lamborghini Countach 25th",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/lamborghini/6706/lamborghini-countach-25th.html",
+   "size": "2.22 MB",
+   "updated": "2025-06-16",
+   "rating": 9,
+   "replaces": "the Countach",
+   "about": "The model redone from Gran Turismo 7 blueprints, with a new sound, tuned performance and rare factory colours.",
+   "check": [
+    "gamedata/carmodel/cout/car.viv"
+   ]
+  },
+  {
+   "id": 6711,
+   "title": "Lamborghini Diablo SV (all versions)",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/lamborghini/6711/lamborghini-diablo-sv-all-versions.html",
+   "size": "17.02 MB",
+   "updated": "2025-04-05",
+   "rating": 9.3,
+   "replaces": "the Diablo SV, Pursuit Diablo and AI interceptor",
+   "about": "All three Diablos rebuilt: the racer, the pursuit car and the PSX-style interceptor the AI police drive.",
+   "check": [
+    "gamedata/carmodel/diab/car.viv"
+   ]
+  },
+  {
+   "id": 6818,
+   "title": "Ferrari 550 Maranello",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/ferrari/6818/ferrari-550-maranello.html",
+   "size": "3.08 MB",
+   "updated": "2025-04-13",
+   "rating": 9.5,
+   "replaces": "the 550 Maranello",
+   "about": "A new model with 3D headlights, High Stakes PSX sounds and extra colours, including Blu Tour de France.",
+   "check": [
+    "gamedata/carmodel/fm50/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "3D headlights"
+    },
+    {
+     "label": "Classic 2D lights",
+     "swap": {
+      "car2.viv": "car.viv"
+     }
+    }
+   ]
+  },
+  {
+   "id": 6705,
+   "title": "Ferrari 456M GT",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/ferrari/6705/ferrari-456m-gt.html",
+   "size": "1.92 MB",
+   "updated": "2025-04-13",
+   "rating": 9.9,
+   "replaces": "the 456M GT",
+   "about": "A higher quality model, the real Ferrari shades (Verde Mugello at last) and gearing that no longer skips shifts.",
+   "check": [
+    "gamedata/carmodel/456g/car.viv"
+   ]
+  },
+  {
+   "id": 6744,
+   "title": "Jaguar XJR-15",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/jaguar/6744/jaguar-xjr-15.html",
+   "size": "2.07 MB",
+   "updated": "2025-04-12",
+   "rating": 9.7,
+   "replaces": "the XJR-15",
+   "about": "A new model traced from Forza Horizon 5, a fixed steering wheel and a white car for Ace.",
+   "check": [
+    "gamedata/carmodel/jxjr/car.viv"
+   ]
+  },
+  {
+   "id": 6966,
+   "title": "Jaguar XK8 and XKR",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/jaguar/6966/jaguar-x100.html",
+   "size": "8.55 MB",
+   "updated": "2025-04-12",
+   "rating": 9.7,
+   "replaces": "the XK8 and the XKR",
+   "about": "Both Jaguars rebuilt, with fixed dashboard views, corrected colours and a coupé or convertible body for each.",
+   "check": [
+    "gamedata/carmodel/jxk8/car.viv",
+    "gamedata/carmodel/jxkr/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "XK8 coupé, XKR convertible"
+    },
+    {
+     "label": "XK8 convertible, XKR coupé",
+     "swap": {
+      "car2.viv": "car.viv"
+     }
+    }
+   ]
+  },
+  {
+   "id": 7867,
+   "title": "Italdesign Scighera",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/italdesign/7867/italdesign-scighera.html",
+   "size": "5.8 MB",
+   "updated": "2025-04-12",
+   "rating": 9.6,
+   "replaces": "the Scighera",
+   "about": "Now four-wheel drive like the real car, with real Alfa Romeo colours, a new engine sound, showcase and loading slide.",
+   "check": [
+    "gamedata/carmodel/scig/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "Standard dashboard"
+    },
+    {
+     "label": "Dashboard with gear indicator",
+     "swap": {
+      "car2.viv": "car.viv"
+     }
+    }
+   ]
+  },
+  {
+   "id": 6707,
+   "title": "Chevrolet Corvette C5",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/chevrolet/6707/1998-chevrolet-corvette-c5.html",
+   "size": "21.24 MB",
+   "updated": "2025-04-03",
+   "rating": 9.9,
+   "replaces": "the Corvette, Pursuit Corvette and pace car",
+   "about": "The Corvette, its pursuit version and the pace car, with a sound built from High Stakes PSX samples and real gearing.",
+   "check": [
+    "gamedata/carmodel/corv/car.viv"
+   ]
+  },
+  {
+   "id": 7430,
+   "title": "Mercedes-Benz SL600 (R129)",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/mercedes-benz/7430/1997-mercedes-benz-sl600-r129.html",
+   "size": "1.99 MB",
+   "updated": "2025-10-27",
+   "rating": 9,
+   "replaces": "the SL600",
+   "about": "A higher quality model, a centred dashboard view and corrected colours that the AI uses too.",
+   "check": [
+    "gamedata/carmodel/sl60/car.viv"
+   ]
+  },
+  {
+   "id": 7125,
+   "title": "Aston Martin DB7",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/astonmartin/7125/aston-martin-db7.html",
+   "size": "2.06 MB",
+   "updated": "2025-05-14",
+   "rating": 9.5,
+   "replaces": "the DB7",
+   "about": "A new model, new sound samples, a cleaner dashboard and colours checked against real photos.",
+   "check": [
+    "gamedata/carmodel/amd7/car.viv"
+   ]
+  },
+  {
+   "id": 7498,
+   "title": "Lister Storm",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/lister/7498/1994-lister-storm.html",
+   "size": "3.08 MB",
+   "updated": "2025-04-02",
+   "rating": 9.8,
+   "replaces": "the Lister Storm",
+   "about": "A new model, a dashboard drawn from scratch, a better sound, and the car now races against you as an AI too.",
+   "check": [
+    "gamedata/carmodel/lstm/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "Current"
+    },
+    {
+     "label": "Legacy model",
+     "swap": {
+      "car-legacy.viv": "car.viv"
+     }
+    }
+   ]
+  },
+  {
+   "id": 7320,
+   "title": "Spectre R42",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/spectre/7320/1995-spectre-r42.html",
+   "size": "1.87 MB",
+   "updated": "2025-04-12",
+   "rating": 9.3,
+   "replaces": "the Spectre R42",
+   "about": "Rebuilt with better proportions and performance matched to the real car, now in class B where it belongs.",
+   "check": [
+    "gamedata/carmodel/sr42/car.viv"
+   ]
+  },
+  {
+   "id": 6736,
+   "title": "HSV VT GTS",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/hsv/6736/hsv-vt-gts.html",
+   "size": "9.38 MB",
+   "updated": "2023-06-13",
+   "rating": 10,
+   "replaces": "the HSV GTS",
+   "about": "A new model and player sound, a centred dashboard, the real colours, and the police now call it a Commodore.",
+   "check": [
+    "gamedata/carmodel/hgts/car.viv"
+   ]
+  },
+  {
+   "id": 7309,
+   "title": "Ford Falcon EL",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/ford/7309/1997-ford-falcon-el.html",
+   "size": "2.24 MB",
+   "updated": "2022-07-31",
+   "rating": 8.9,
+   "replaces": "the Falcon and the Atlantica police cruiser",
+   "about": "The Falcon rebuilt (no more lawnmower sound), plus a matching police cruiser for Atlantica.",
+   "check": [
+    "gamedata/carmodel/ffal/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "GLi police cruiser"
+    },
+    {
+     "label": "GT police cruiser",
+     "swap": {
+      "car2.viv": "car.viv"
+     }
+    }
+   ]
+  },
+  {
+   "id": 7864,
+   "title": "Mercedes-Benz Unimog 404",
+   "author": "rata_536",
+   "kind": "car",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/mercedes-benz/7864/mercedes-benz-unimog-404.html",
+   "size": "2.81 MB",
+   "updated": "2025-04-03",
+   "rating": 9.5,
+   "replaces": "the Knockout truck",
+   "about": "The Knockout bonus truck rebuilt, with gearing matched to the real Unimog.",
+   "check": [
+    "gamedata/carmodel/knoc/car.viv"
+   ]
+  },
+  {
+   "id": 8059,
+   "title": "HQ Police pack",
+   "author": "rata_536",
+   "kind": "police",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/pursuitcars/8059/hq-police-pack-replacement.html",
+   "size": "22.04 MB",
+   "updated": "2025-04-02",
+   "rating": 9.2,
+   "replaces": "the AI police cars",
+   "about": "Every police car that chases you in races, rebuilt in high quality with new liveries.",
+   "check": [
+    "gamedata/carmodel/traffic/pursuit/0000/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "Current"
+    },
+    {
+     "label": "Legacy (closer to the original look)",
+     "keep": "legacy/"
+    }
+   ],
+   "base": "gamedata/carmodel/traffic/pursuit/"
+  },
+  {
+   "id": 10057,
+   "title": "Lamborghini Countach (Pursuit)",
+   "author": "rata_536",
+   "kind": "police",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/pursuitcars/10057/lamborghini-countach-pursuit.html",
+   "size": "8.5 MB",
+   "updated": "2025-07-02",
+   "rating": 10,
+   "about": "A police Countach for class B pursuits, with radar on the dashboard and its own loading slide.",
+   "check": [
+    "gamedata/carmodel/ccop/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "Black and white"
+    },
+    {
+     "label": "Polizia",
+     "swap": {
+      "car2.viv": "car.viv",
+      "43_01.qfs": "43_00.qfs"
+     }
+    }
+   ]
+  },
+  {
+   "id": 7992,
+   "title": "HSV VT GTS (Pursuit)",
+   "author": "rata_536",
+   "kind": "police",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/pursuitcars/7992/hsv-vt-gts-pursuit.html",
+   "size": "4.09 MB",
+   "updated": "2023-06-14",
+   "rating": 8.7,
+   "about": "A police GTS for class C pursuits, with radar on the dashboard and a PSX-style loading slide.",
+   "check": [
+    "gamedata/carmodel/hcop/car.viv"
+   ],
+   "variants": [
+    {
+     "label": "Main livery"
+    },
+    {
+     "label": "Alternate livery",
+     "swap": {
+      "car2.viv": "car.viv",
+      "40_01.qfs": "40_00.qfs"
+     }
+    }
+   ]
+  },
+  {
+   "id": 7127,
+   "title": "Aston Martin DB7 (Pursuit)",
+   "author": "rata_536",
+   "kind": "police",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/pursuitcars/7127/aston-martin-db7-pursuit.html",
+   "size": "1.49 MB",
+   "updated": "2022-06-27",
+   "rating": 9,
+   "about": "A police DB7 for class C pursuits, with radar on the dashboard and a PSX-style loading slide.",
+   "check": [
+    "gamedata/carmodel/acop/car.viv"
+   ]
+  },
+  {
+   "id": 8793,
+   "title": "HQ Traffic pack",
+   "author": "rata_536",
+   "kind": "traffic",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/pursuitcars/8793/hq-traffic-pack-replacement.html",
+   "size": "18.02 MB",
+   "updated": "2025-04-01",
+   "rating": 9.3,
+   "replaces": "the traffic cars",
+   "about": "All the traffic you weave through, rebuilt; each car shows its GO code on the licence plate so you can drive it.",
+   "check": [
+    "gamedata/carmodel/traffic/0000/car.viv"
+   ]
+  },
+  {
+   "id": 6648,
+   "title": "Consistent race slides pack",
+   "author": "rata_536",
+   "kind": "extra",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/bootscreens/6648/consistent-race-slides-pack.html",
+   "size": "7.3 MB",
+   "updated": "2023-07-08",
+   "rating": 10,
+   "replaces": "the car loading slides",
+   "about": "Every car's loading slide redone in one PSX style that matches the track loading screens.",
+   "check": [
+    "fedata/art/slides/02_00.qfs"
+   ]
+  },
+  {
+   "id": 6825,
+   "title": "Knuckles the Echidna",
+   "author": "rata_536",
+   "kind": "extra",
+   "page": "https://www.nfsaddons.com/downloads/nfshp/cars/other/6825/knuckles-the-echidna.html",
+   "size": "12.12 MB",
+   "updated": "2022-03-05",
+   "rating": 10,
+   "about": "Exactly what it says. A joke car with far more power than it should have.",
+   "check": [
+    "gamedata/carmodel/kte/car.viv"
+   ]
+  }
+ ]
+}

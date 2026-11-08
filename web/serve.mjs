@@ -84,7 +84,7 @@ setInterval(() => {
 // ?v=<build>: index.html and our .js files are rewritten on the way out, and a new build means
 // new addresses. Inside dist/nfs3.js the same goes for "nfs3.js" (its game threads load it
 // again) and "nfs3.wasm". sw.js keeps a fixed address (a service worker is identified by it).
-const SCRIPTS = ['main.js', 'net.js', 'net-worker.js', 'audio-worklet.js', 'dist/nfs3.js'];
+const SCRIPTS = ['main.js', 'mods.js', 'net.js', 'net-worker.js', 'audio-worklet.js', 'dist/nfs3.js'];
 let verCache = { t: 0, v: '' };
 function version() {
   if (Date.now() - verCache.t < 2000) return verCache.v;
@@ -95,7 +95,7 @@ function version() {
 }
 function versioned(text) {
   const v = version();
-  return text.replace(/(["'])(\.\/)?(main\.js|net\.js|net-worker\.js|audio-worklet\.js|dist\/nfs3\.js|nfs3\.js|nfs3\.wasm)\1/g, (m, q, dot, f) => `${q}${dot || ''}${f}?v=${v}${q}`);
+  return text.replace(/(["'])(\.\/)?(main\.js|mods\.js|net\.js|net-worker\.js|audio-worklet\.js|dist\/nfs3\.js|nfs3\.js|nfs3\.wasm)\1/g, (m, q, dot, f) => `${q}${dot || ''}${f}?v=${v}${q}`);
 }
 
 // page analytics (analytics.mjs): events in build/analytics/, summary at /__stats

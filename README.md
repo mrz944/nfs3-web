@@ -54,6 +54,15 @@ Pursuit Lamborghini Diablo SV and Pursuit El Niño) and the bonus track Empire C
 from the first race, set in the game's own "awarded" flags (`runtime/game.c`; `RT_LOCKED=1`
 keeps the original locks). Gamepads and wheels work as DirectInput joysticks.
 
+**Settings and mods on the start page.** *Game Settings* (kept in the browser) covers intro
+movies, starting in fullscreen, an fps counter, unlocks, controllers, the largest resolution
+offered, render sharpness and volume. *Mods* is one switch for rata_536's remastered cars (every
+car, the police and traffic cars, PSX-style loading slides). The server hosts the set: build it
+from the authors' archives (each saved as `<id>.zip`, ids in `web/mods.json`) with
+`node tools/build-mods.mjs ARCHIVE_DIR`, which writes `web/mods/rata536/` (git-ignored, like the
+game files). Switching it on copies the files into the game in the browser (`web/mods.js`),
+backing up what they replace; switching it off puts the originals back.
+
 **Our runtime fixes.** A few things the game expects from Windows had to be emulated precisely
 before it ran correctly, for example:
 - the `NUL` device that the car screen opens;

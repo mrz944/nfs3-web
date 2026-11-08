@@ -5,6 +5,8 @@
 //  3. Each animation frame we upload the shared framebuffer to WebGL; input goes
 //     into a lock-free ring; audio comes out of a ring through an AudioWorklet.
 
+import { setupMods, moddedPaths, forgetMods, modsSettled } from './mods.js';
+
 const $ = (id) => document.getElementById(id);
 const status = (msg, err = false) => { $('status').textContent = msg; $('status').className = err ? 'err' : ''; };
 
@@ -191,8 +193,9 @@ async function checkPack() {
     const idx = await (await fetch(base + 'index.json')).json();
     if (idx.id !== id) return;
     let bad = 0, first = '';
+    const modded = await moddedPaths(d);                               // files mods replaced (mods.js)
     for (const c of idx.chunks) for (const [path, size] of c.files) {
-      if (/^(nfs3\.ini|fedata\/text\/text\.eng)$/i.test(path)) continue;
+      if (/^(nfs3\.ini|fedata\/text\/text\.eng)$/i.test(path) || modded.has(path.toLowerCase())) continue;
       const parts = path.split('/');
       let ok = false;
       try { let h = d; for (const p of parts.slice(0, -1)) h = await h.getDirectoryHandle(p); ok = (await (await h.getFileHandle(parts.at(-1))).getFile()).size === size; } catch {}
@@ -202,6 +205,7 @@ async function checkPack() {
       log(`game files: ${bad} damaged (first: ${first}), downloading them again`);
       track('error', { kind: 'damaged', msg: `${bad} files` });
       for (const f of ['.download-complete', '.pack-done']) await d.removeEntry(f).catch(() => {});
+      await forgetMods(d);                                             // every file comes again, mods included
       await d.getDirectoryHandle('fedata').then((f) => f.getDirectoryHandle('text')).then((t) => t.removeEntry('text.eng.orig')).catch(() => {});
     } else await writeText(d, '.pack-checked', id);
   } catch (e) { log('game files check failed:', e.message); }
@@ -260,18 +264,46 @@ async function writeGameName(name) {
 async function fileBytes(dir, name) { try { return new Uint8Array(await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer()); } catch { return null; } }
 async function writeBytes(dir, name, bytes) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(exact(bytes)); await w.close(); }
 
+// --------------------------------------------------------------- settings
+// Game Settings on the start page, kept in this browser (localStorage nfs3.settings) and used
+// when the game starts: intro movies (nfs3.ini NoMovies), fullscreen, the fps counter, the
+// resolutions the game offers (RT_SCREEN, glide.c), the render scale (gpu.c), unlocks
+// (RT_LOCKED, game.c), controllers and volume.
+const SETTINGS_DEFAULT = { fullscreen: false, fps: false, movies: false, unlock: true, pads: false, screen: '1920x1080', quality: '1', volume: 100 };
+const settings = { ...SETTINGS_DEFAULT };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('nfs3.settings') || '{}')); } catch {}
+function setupSettings() {
+  const els = [...document.querySelectorAll('[data-set]')];
+  const auto = screenPixels().replace('x', '×');
+  $('set-screen-auto').textContent = `Up to this screen (${auto})`;
+  const draw = () => {
+    for (const el of els) { const v = settings[el.dataset.set]; if (el.type === 'checkbox') el.checked = !!v; else el.value = String(v); }
+    $('set-volume-out').textContent = `${settings.volume}%`;
+    watchPads.show?.();
+  };
+  const save = () => { try { localStorage.setItem('nfs3.settings', JSON.stringify(settings)); } catch {} };
+  for (const el of els) el.addEventListener(el.type === 'range' ? 'input' : 'change', () => {
+    const k = el.dataset.set;
+    settings[k] = el.type === 'checkbox' ? el.checked : el.type === 'range' ? Number(el.value) : el.value;
+    save(); draw();
+  });
+  $('set-reset').addEventListener('click', () => { Object.assign(settings, SETTINGS_DEFAULT); save(); draw(); });
+  draw();
+}
+
 // The browser build renders through the Voodoo2 (Glide) driver -> WebGL2, and skips the FMVs
 // (intro, menu attract demos): the game's movie streamer races its file reader thread and on
 // multi-core machines can wait forever for the first frame (about 1 start in 4 natively, nearly
-// every start in Safari). NoMovies is the modern patch's own switch for this.
+// every start in Safari). NoMovies is the modern patch's own switch for this; the Intro movies
+// setting turns them back on.
 const iniSet = (t, key, val) => (new RegExp(`^${key}\\s*=.*$`, 'mi').test(t) ? t.replace(new RegExp(`^${key}\\s*=.*$`, 'mi'), `${key}=${val}`) : t);
-const patchIni = (t) => iniSet(iniSet(t, 'ThrashDriver', 'glide3x'), 'NoMovies', '1');
+const patchIni = (t, movies = false) => iniSet(iniSet(t, 'ThrashDriver', 'glide3x'), 'NoMovies', movies ? '0' : '1');
 async function ensureIni() {
   try {
     const d = await gameDir();
     const fh = await d.getFileHandle('nfs3.ini');
-    const t = await (await fh.getFile()).text(), u = patchIni(t);
-    if (u !== t) { const w = await fh.createWritable(); await w.write(u); await w.close(); log('nfs3.ini: ThrashDriver=glide3x, NoMovies=1'); }
+    const t = await (await fh.getFile()).text(), u = patchIni(t, settings.movies);
+    if (u !== t) { const w = await fh.createWritable(); await w.write(u); await w.close(); log(`nfs3.ini: ThrashDriver=glide3x, NoMovies=${settings.movies ? 0 : 1}`); }
   } catch (e) { log('nfs3.ini not patched:', e.message); }
 }
 
@@ -368,6 +400,7 @@ function setupFullscreen() {
   };
   document.addEventListener('fullscreenchange', changed);
   document.addEventListener('webkitfullscreenchange', changed);
+  changed();
 }
 
 function attachInput(mod, canvas) {
@@ -441,6 +474,7 @@ function attachInput(mod, canvas) {
 const PAD_BYTES = 116;
 const padRest = new Map();          // gamepad id -> axis values when first seen (pedal detection)
 function padList() {
+  if (!settings.pads) return [];
   let all = [];
   try { all = [...(navigator.getGamepads?.() || [])].filter((p) => p && p.connected); } catch {}
   return all.sort((a, b) => isWheel(b) - isWheel(a));      // a wheel is controller 1
@@ -510,8 +544,10 @@ function watchPads() {
     const pads = padList();
     if (gameStarted && pads.length && !padsAtStart) { el.textContent = `${padName(pads[0])} connected: reload the page to drive with it.`; return; }
     if (gameStarted) return;
-    el.textContent = pads.length ? `Controller: ${pads.map(padName).join(', ')}. Set it up in Options › Controllers.` : 'Controller or wheel? Press any button on it before Start.';
+    el.textContent = !settings.pads ? 'Gamepads and wheels are off (Game Settings).'
+      : pads.length ? `Controller: ${pads.map(padName).join(', ')}. Set it up in Options › Controllers.` : 'Controller or wheel? Press any button on it before Start.';
   };
+  watchPads.show = show;
   window.addEventListener('gamepadconnected', (e) => { log(`controller connected: ${e.gamepad.id} (${e.gamepad.mapping || 'raw'} mapping, ${e.gamepad.axes.length} axes, ${e.gamepad.buttons.length} buttons)`); show();
     if (gameStarted && !padsAtStart) { $('hint').textContent = 'Controller connected: reload the page to drive with it (the game looks for controllers at start)'; $('hint').hidden = false; } });
   window.addEventListener('gamepaddisconnected', show);
@@ -538,8 +574,9 @@ async function startAudio(mod) {
   const node = new AudioWorkletNode(ctx, 'ring-player', { outputChannelCount: [2] });
   node.port.postMessage({ buffer: mod.HEAPU8.buffer, ptr: mod._rt_web_audio(), beat: mod._rt_web_heartbeat() });
   node.port.onmessage = (e) => { const { under, secs } = e.data; if (under > 0.05 * 44100 * secs) log(`audio: ${(under / 441 / secs).toFixed(0)}% silence over ${secs.toFixed(0)} s (game mixed too little)`); };
-  node.connect(ctx.destination);
-  log('audio context:', ctx.state);
+  const gain = new GainNode(ctx, { gain: Math.max(0, Math.min(100, Number(settings.volume) || 0)) / 100 });
+  node.connect(gain).connect(ctx.destination);
+  log('audio context:', ctx.state, settings.volume !== 100 ? `(volume ${settings.volume}%)` : '');
   ctx.onstatechange = () => log('audio context:', ctx.state);
   // browsers keep audio suspended until a user gesture: never wait for it here
   if (ctx.state !== 'running') {
@@ -584,6 +621,8 @@ async function start() {
   padsAtStart = padList().length;
   if (padsAtStart) log(`controllers for the game: ${padList().map((p) => `${padName(p)} (${p.mapping || 'raw'}${isWheel(p) ? ', wheel' : ''})`).join(', ')}`);
   status('Loading the recompiled game…');
+  log('settings:', Object.entries(settings).map(([k, v]) => `${k}=${v}`).join(' '));
+  await modsSettled();                                               // mods switched on just now: let them finish copying
   await ensureIni();
   await writeGameName($('pname')?.value);
   const startT = performance.now();
@@ -606,7 +645,7 @@ async function start() {
       log('ERROR game exited, code', code); track('error', { kind: 'exit', msg: 'code ' + code }); gameStopped('The game closed itself (see the log). Reload the page to start again.');
     },
     // the screen in pixels, landscape: the game offers the resolutions that fit (glide.c)
-    arguments: ['/opfs/nfs3', `RT_SCREEN=${screenPixels()}`],
+    arguments: ['/opfs/nfs3', `RT_SCREEN=${settings.screen === 'auto' ? screenPixels() : settings.screen}`, ...(settings.unlock ? [] : ['RT_LOCKED=1'])],
     // controllers before the game looks for them (it does once, right at start)
     preRun: [(m) => { try { writePads(m); } catch {} }],
     print: (t) => console.log(t),
@@ -636,7 +675,7 @@ async function start() {
   startAudio(mod).catch((e) => log('audio unavailable:', e.message || e));
 
   let fpsN = 0, fpsT = performance.now(), first = true, stalled = false, lastFresh = performance.now();
-  $('fps').hidden = false;
+  $('fps').hidden = !settings.fps;
   function frame() {
     if (gameDead) return;
     fitCanvas(canvas);
@@ -709,13 +748,14 @@ async function deviceInfo() {
 // rendering up to 2560x1920. If frames are ready but the screen doesn't take them in time,
 // the next lower scale is used (and remembered in this browser). ?scale=N forces one.
 const hitch = { raf: 0, game: 0, frames: 0, lastFresh: 0, mainMs: 0, mainMax: 0, intervals: [] };
-const savedScale = () => { try { return Number(new URLSearchParams(location.search).get('scale')) || Number(localStorage.getItem('nfs3.maxScale')) || 3; } catch { return 3; } };
+const fixedScale = () => { try { return Number(new URLSearchParams(location.search).get('scale')) || Number(settings.quality) || 0; } catch { return 0; } };
+const savedScale = () => { try { return fixedScale() || Number(localStorage.getItem('nfs3.maxScale')) || 3; } catch { return 3; } };
 function startPerfLog(mod) {
   if (net.id) log(`net: room ${net.room} (${net.info?.name || ''}) as "${$('pname')?.value || ''}" id ${net.id}`);
-  const forced = (() => { try { return new URLSearchParams(location.search).has('scale'); } catch { return false; } })();
+  const forced = !!fixedScale();
   let maxScale = savedScale(), slow = 0;
   mod._rt_gpu_set_max_scale(maxScale);
-  log(`perf: render scale limit ${maxScale}${forced ? ' (forced by ?scale)' : ''}`);
+  log(`perf: render scale limit ${maxScale}${forced ? ' (fixed: Sharpness setting or ?scale)' : ''}`);
   const stats = () => { const p = mod._rt_gpu_stats() >> 3; return Array.from(mod.HEAPF64.subarray(p, p + 6)); };
   let t = performance.now(), prev = stats();
   setInterval(() => {
@@ -994,6 +1034,7 @@ function setupLogToggle() {
 }
 async function init() {
   setupLogToggle();
+  setupSettings();
   $('tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
   setupOnline();
   setupActivity();
@@ -1017,9 +1058,11 @@ async function init() {
     net.useWorker = localStorage.getItem('nfs3.networker') === '1';
   } catch {}
   log('build', buildInfo.built || '?');
+  const modsUi = setupMods({ gameRoot: () => gameDir(), log, hasGame }).catch((e) => log('mods:', e.message));
   const refresh = async () => {
     const ok = await hasGame();
     $('pick-label').hidden = ok; $('start').hidden = !ok; $('forget').hidden = !ok;
+    (await modsUi)?.refresh();
     status(ok ? 'Game files are stored in this browser. Ready.' : 'Choose your NFS3 folder (the one with nfs3.exe, fedata and gamedata).');
   };
   $('pick').addEventListener('change', async (e) => {
@@ -1049,7 +1092,10 @@ async function init() {
     phase.download = Math.round((performance.now() - d0) / 100) / 10; mark('files');
   }
   if (new URLSearchParams(location.search).has('autostart') && (await hasGame())) { start().catch((e) => { console.error('Failed to start:', e.stack || e); status('Failed to start: ' + e.message, true); $('setup-wrap').hidden = false; }); }
-  $('start').addEventListener('click', () => { if (!earlyAudio) earlyAudio = makeAudioContext(); start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }); });
+  $('start').addEventListener('click', () => {
+    if (!earlyAudio) earlyAudio = makeAudioContext();
+    if (settings.fullscreen && fsSupported() && !fsElement()) toggleFullscreen();   // only allowed inside the click
+    start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }); });
   await refresh();
 }
 init();
