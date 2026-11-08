@@ -170,7 +170,11 @@ async function importPack(base) {
         await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
       }
     }
-    if (lastErr) throw new Error(`Download failed: ${lastErr.message}. Reload to continue where it stopped.`);
+    if (lastErr) {
+      // storage refusing the files (Safari words it "unknown transient reason (e.g. out of memory)")
+      const full = /QuotaExceeded|UnknownError|NoModificationAllowed|InvalidState/.test(lastErr.name) ? ' The browser would not store the files: free some disk space, leave private browsing, or close other tabs with this page.' : '';
+      throw new Error(`Download failed: ${lastErr.message}.${full} Reload to continue where it stopped.`);
+    }
   }
   for (const d of idx.dirs || []) await subdir(d + '/');
   log(`game pack ${idx.id}: ${(fresh / MB).toFixed(0)} MB in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
@@ -439,7 +443,11 @@ function attachInput(mod, canvas) {
 
   // the game's cursor is relative (DirectInput): pointer lock gives clean deltas
   const acc = { x: 0, y: 0 };
-  canvas.addEventListener('click', () => { if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.(); });
+  // (phones and tablets have no pointer lock: Android Chrome rejects the request with NotSupportedError)
+  canvas.addEventListener('click', () => {
+    if (document.pointerLockElement === canvas || !matchMedia('(any-pointer: fine)').matches) return;
+    canvas.requestPointerLock?.()?.catch?.(() => {});
+  });
   document.addEventListener('pointerlockchange', () => {
     const locked = document.pointerLockElement === canvas;
     $('hint').hidden = locked; document.body.classList.toggle('locked', locked);
@@ -1032,6 +1040,17 @@ function setupLogToggle() {
   t.onclick = (e) => { e.preventDefault(); try { localStorage.setItem('nfs3.log', logWanted() ? '0' : '1'); } catch {} draw(); };
   draw();
 }
+// One tab at a time: a second tab can't write game files the first one has open (its download
+// fails), and two games would share one set of files and saves. The lock is held until the tab
+// closes or reloads.
+function oneTab() {
+  if (!navigator.locks?.request) return Promise.resolve(true);
+  return new Promise((ok) => {
+    navigator.locks.request('nfs3-game', { ifAvailable: true }, (lock) => { ok(!!lock); return lock ? new Promise(() => {}) : undefined; })
+      .catch(() => ok(true));
+  });
+}
+
 async function init() {
   setupLogToggle();
   setupSettings();
@@ -1045,6 +1064,10 @@ async function init() {
     return;
   }
   if (!navigator.storage?.getDirectory) { status('This browser has no Origin Private File System support.', true); return; }
+  if (!(await oneTab())) {
+    status('NFS3 is already open in another tab or window. Close that one, then reload this page.', true);
+    log('another tab has the game open'); return;
+  }
   try { buildInfo = await (await fetch('dist/build-info.json', { cache: 'no-cache' })).json(); } catch {
     status('No recompiled build found in web/dist. Run ./build-web.sh first.', true); return;
   }
