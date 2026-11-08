@@ -158,7 +158,7 @@ NFS3 Web makes a **room** on the server look like a LAN to the game:
   `ARCHITECTURE.md`).
 - **A Linux build machine** with `clang`, `python3`, SDL2 and Mesa (GLES/EGL) for the native build, and
   [Emscripten](https://emscripten.org/) for the web build.
-- **Node.js 18+** for the dev server and lobby (no npm packages needed).
+- **Node.js 22+** for the dev server and lobby (no npm packages needed).
 - **A recent Chrome, Edge, Firefox or Safari** with WebGL 2 for playing.
 
 ### Build
@@ -206,7 +206,9 @@ Keyboard controls are the original ones. Click the picture to capture the mouse,
 | `--relay-tcp PORT\|PATH` | lobby endpoint for native test builds (`RT_NET=…`) |
 
 The server also collects **page logs** (`build/clientlogs/`) and **cookie-free analytics**
-(`build/analytics/`, summary at `/__stats`). Both stay on your machine.
+(`build/analytics/`, summary at `/__stats`). Both stay on your machine. `/__stats` asks for a
+password (any user name): `NFS3_STATS_PASSWORD`, or the one the server writes to
+`build/stats-password` on first start.
 
 ## Project layout
 

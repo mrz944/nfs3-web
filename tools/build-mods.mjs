@@ -8,7 +8,7 @@
 // The output is the mod authors' work, not ours: it is git-ignored, like the game files.
 import { createHash } from 'node:crypto';
 import { mkdirSync, openAsBlob, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { planFiles, readZip } from '../web/mods.js';
 
@@ -35,7 +35,8 @@ const index = [], h = createHash('sha256');
 let bytes = 0, gz = 0;
 for (const [p, { f }] of [...files].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
   const raw = Buffer.from(await (await f.blob()).arrayBuffer()), z = gzipSync(raw, { level: 9 });
-  const dst = join(out, 'files', p + '.gz');
+  const dst = resolve(out, 'files', p + '.gz');
+  if (!dst.startsWith(resolve(out, 'files') + sep)) { console.error(`refusing ${p}: outside the output folder`); process.exit(1); }
   mkdirSync(dirname(dst), { recursive: true });
   writeFileSync(dst, z);
   index.push([p, raw.length, z.length]);

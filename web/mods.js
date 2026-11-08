@@ -57,6 +57,8 @@ export function planFiles(list, mod = {}, variant = null) {
   const swap = variant?.swap || {};                                   // { "car2.viv": "car.viv" }
   const target = (low) => {
     const parts = low.split('/').filter(Boolean), name = parts.at(-1);
+    // archives are untrusted input: nothing that could climb out of the game folder
+    if (/[\\\0:]/.test(low) || parts.some((p) => p === '.' || p === '..')) return null;
     let i = parts.findIndex((s) => s === 'fedata' || s === 'gamedata');
     if (i >= 0) return parts.slice(i).join('/');
     i = parts.findIndex((s) => s === 'carmodel'); if (i >= 0) return 'gamedata/' + parts.slice(i).join('/');
