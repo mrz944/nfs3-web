@@ -1060,7 +1060,17 @@ async function init() {
   watchPads();
   log('page loaded; crossOriginIsolated =', crossOriginIsolated, '; SharedArrayBuffer =', typeof SharedArrayBuffer);
   if (!crossOriginIsolated) {
-    status('This page must be served with cross-origin isolation (COOP/COEP headers). Use web/serve.mjs.', true);
+    // the server sends COOP/COEP (serve.mjs); a browser that still isn't isolated is too old or locked down
+    status('This browser can\'t run the game: it is too old or a setting or extension blocks what the game needs (SharedArrayBuffer). Try an up-to-date Chrome, Edge, Firefox or Safari.', true);
+    track('error', { kind: 'browser', msg: 'not cross-origin isolated' });
+    return;
+  }
+  // no WebGL2 (hardware acceleration off, GPU blocklisted): the game would run behind a black screen
+  let gl2 = null;
+  try { gl2 = document.createElement('canvas').getContext('webgl2'); gl2?.getExtension('WEBGL_lose_context')?.loseContext(); } catch {}
+  if (!gl2) {
+    status('This browser can\'t draw the game: WebGL2 is off or blocked. Turn on hardware (graphics) acceleration in the browser settings, restart the browser, then reload this page.', true);
+    log('no WebGL2'); track('error', { kind: 'browser', msg: 'no WebGL2' });
     return;
   }
   if (!navigator.storage?.getDirectory) { status('This browser has no Origin Private File System support.', true); return; }
