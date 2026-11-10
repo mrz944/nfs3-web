@@ -133,7 +133,10 @@ static uint32_t k_ReadFile(CPU *c, const uint32_t *a) {
 }
 static uint32_t k_WriteFile(CPU *c, const uint32_t *a) {
     File *f = getfile(A(0)); if (!f) return 0;
-    ssize_t n = write(f->fd, G + A(1), A(2));
+    extern uint8_t *game_config_write(const char *, int64_t, const uint8_t *, uint32_t);   /* game.c */
+    uint8_t *fixed = f->fd > 2 ? game_config_write(f->path, (int64_t)lseek(f->fd, 0, SEEK_CUR), G + A(1), A(2)) : NULL;
+    ssize_t n = write(f->fd, fixed ? fixed : G + A(1), A(2));
+    free(fixed);
     if (A(3)) WR32(A(3), n < 0 ? 0 : (uint32_t)n);
     return n >= 0;
 }

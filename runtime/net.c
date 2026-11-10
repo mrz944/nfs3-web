@@ -225,6 +225,12 @@ static void sync_state_in(const uint8_t *d, int n) {
     }
     pthread_mutex_unlock(&sync_mu);
 }
+/* which car this player drives: -1 offline, -2 online but not known (yet) */
+int net_local_car(void) {
+    if (!online) return -1;
+    if (am_host) return 0;
+    return my_slot > 0 ? my_slot : -2;
+}
 /* once a frame on the game thread: send my cars, apply the others' */
 void net_frame(void) {
     if (!sync_enabled()) return;

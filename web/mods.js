@@ -7,6 +7,7 @@
 // planFiles/readZip are the build tool's: which files of an archive the game reads and where they
 // go (anchors like FEDATA/, GAMEDATA/, CARMODEL/, TRAFFIC/; a mod's variants and base folder).
 // State: .mods/state.json in the game folder.
+import { writeFile } from './opfs.js';
 
 const MODS_DIR = '.mods';
 const ALLOWED = /\.(viv|bnk|qfs|fsh|fce|frd|col|can|hrz)$/i;
@@ -109,10 +110,7 @@ async function fileAt(root, path) {
   const c = await findChild(d, parts.at(-1), 'file');
   return c ? { dir: d, name: c.n, handle: c.h } : null;
 }
-async function writeBlob(dir, name, blob) {
-  const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
-  await w.write(blob); await w.close();
-}
+async function writeBlob(dir, name, blob) { await writeFile(dir, name, blob); }
 async function readState(root) {
   try { const d = await root.getDirectoryHandle(MODS_DIR); return JSON.parse(await (await (await d.getFileHandle('state.json')).getFile()).text()); } catch { return { installed: {} }; }
 }
