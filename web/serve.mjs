@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { clientIp, foreignOrigin, handleUpgrade, listenRaw, liveSummary, onRoomCreated, roomStats, setPlayLog } from './relay.mjs';
 import { createPush, dailyRace } from './push.mjs';
 import { createAnalytics } from './analytics.mjs';
+import { createLaps } from './laps.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 // --game DIR: serve game files for automatic browser download into OPFS.
@@ -143,6 +144,9 @@ const analytics = createAnalytics(resolve(root, '..', 'build', 'analytics'));
 const playDir = resolve(root, '..', 'build', 'analytics');
 setPlayLog(playDir);
 
+// lap records (laps.mjs): POST /__lap from the game page, GET /__laps for the start page
+const laps = createLaps(resolve(root, '..', 'build', 'laps'));
+
 // push notifications (push.mjs) and the daily race
 const push = createPush(resolve(root, '..', 'build', 'push'));
 onRoomCreated((r) => push.roomOpened(r));
@@ -193,6 +197,8 @@ const server = createServer((req, res) => {
   if (url.pathname === '/__stats') { if (statsAllowed(req, res)) analytics.handleStats(req, res, roomStats); return; }
   if (req.method === 'POST' && url.pathname === '/__log') { clientLog(req, res); return; }
   if (url.pathname === '/__live') { live(res); return; }
+  if (req.method === 'POST' && url.pathname === '/__lap') { laps.handlePost(req, res); return; }
+  if (url.pathname === '/__laps') { laps.handleGet(req, res); return; }
   if (url.pathname.startsWith('/__push/')) {
     if (req.method === 'POST' && foreignOrigin(req)) { res.writeHead(403).end(); req.resume(); return; }
     push.handle(req, res, url.pathname.slice(1)); return;

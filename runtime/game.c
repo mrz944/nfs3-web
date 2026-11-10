@@ -17,10 +17,24 @@
  * config) and with 0 there it sets the steering to the controls at once (0x4aa262). That word
  * comes from config.dat (1 for both human slots) and, online, from the other players. It is
  * read nowhere else. So for the local players' slots it is held at 0, and config.dat is written
- * with the values the game had there, so the setting never sticks in the player's config. */
+ * with the values the game had there, so the setting never sticks in the player's config.
+ *
+ * The graphics options list each mode as "W x H x depth" (format at 0x538d48), the depth from
+ * the Voodoo2 driver, which only did 16-bit colour. Here every frame is drawn in 32-bit colour
+ * (runtime/gpu.c), so the label says 32; the mode's own depth value is left alone.
+ *
+ * Lap times for the start page's lap records: each car (the table at 0x5efac8, 8 pointers) counts
+ * its finished laps at +0x204 and keeps each lap's time at +0x240 + 4 * lap (8 laps, in 1/64 s);
+ * +0x1e4 is the car's model code ("merc"), +0x1f0 its slot. The race: track number at 0x6fd4ac,
+ * then backward 0x6fd4c0, mirrored 0x6fd4c4, night 0x6fd4c8, weather 0x6fd4cc, laps 0x6fd4d0.
+ * Each lap the local player finishes goes to the page (Module.onLap), and to the log. */
 #include "rt.h"
 #include <string.h>
 #include <strings.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/threading.h>
+#endif
 
 #define AWARDED_CARS 0x6fd2a8u
 #define EMPIRE_CITY 0x6fd2acu
@@ -65,8 +79,60 @@ uint8_t *game_config_write(const char *path, int64_t pos, const uint8_t *buf, ui
     return out;
 }
 
+#define CAR_TABLE 0x5efac8u
+#define RACE_TRACK 0x6fd4acu
+#define RACE_BACKWARD 0x6fd4c0u
+#define RACE_MIRRORED 0x6fd4c4u
+#define RACE_NIGHT 0x6fd4c8u
+#define RACE_WEATHER 0x6fd4ccu
+#define RACE_LAPS 0x6fd4d0u
+static void lap_report(uint32_t car, int lap, uint32_t ticks) {
+    uint32_t code = RD32(car + 0x1e4);
+    int track = (int)RD32(RACE_TRACK), laps = (int)RD32(RACE_LAPS);
+    int flags = (RD32(RACE_BACKWARD) ? 1 : 0) | (RD32(RACE_MIRRORED) ? 2 : 0) | (RD32(RACE_NIGHT) ? 4 : 0) | (RD32(RACE_WEATHER) ? 8 : 0) | (instant > 0 ? 16 : 0);
+    char cc[5] = {0}; memcpy(cc, &code, 4);
+    for (int i = 0; i < 4; i++) if (cc[i] < 32 || cc[i] > 126) cc[i] = '?';
+    rt_log("game: lap %d/%d %u:%02u.%02u (track %d, flags %#x, car %s)", lap, laps, ticks / 64 / 60, ticks / 64 % 60, ticks % 64 * 100 / 64, track, flags, cc);
+#ifdef __EMSCRIPTEN__
+    MAIN_THREAD_ASYNC_EM_ASM({ if (Module.onLap) Module.onLap($0, $1, $2, $3, $4, $5); }, track, flags, (int)code, lap, laps, (int)ticks);
+#endif
+}
+static void lap_watch(void) {
+    extern int net_local_car(void);
+    static uint32_t seen_car; static int done;             /* laps of seen_car already reported */
+    int me = net_local_car();
+    if (me == -2) return;                                    /* online, own car not known yet */
+    int slot = me >= 0 ? me : 0;
+    uint32_t car = 0;
+    for (int k = 0; k < 8; k++) {
+        uint32_t p = RD32(CAR_TABLE + 4u * (uint32_t)k);
+        if (p && p < GUEST_SIZE - 0x1000 && (int)RD32(p + 0x1f0) == slot) { car = p; break; }
+    }
+    if (!car) return;
+    int n = (int)RD32(car + 0x204);
+    if (car != seen_car) { seen_car = car; done = n; return; }   /* laps from before: not now */
+    if (n < done) done = n;                                  /* a new race, or a restart */
+    while (done < n && done < 8) {
+        uint32_t ticks = RD32(car + 0x240 + 4u * (uint32_t)done);
+        if (!ticks) break;                                   /* written a moment later */
+        done++;
+        lap_report(car, done, ticks);
+    }
+}
+
+#define MODE_LABEL 0x538d48u              /* "%d x %d x %d" */
+static void mode_label(void) {
+    static int done;
+    if (done) return;
+    done = 1;
+    static const char orig[] = "%d x %d x %d", now[] = "%d x %d x 32";
+    if (!memcmp(G + MODE_LABEL, orig, sizeof orig)) { memcpy(G + MODE_LABEL, now, sizeof now); rt_log("game: display modes labelled 32-bit"); }
+}
+
 void game_frame(void) {
+    mode_label();
     instant_steering();
+    lap_watch();
     static int locked = -1;
     if (locked < 0) { locked = getenv("RT_LOCKED") && atoi(getenv("RT_LOCKED")); if (!locked) rt_log("game: everything unlocked (bonus cars and Empire City)"); }
     if (locked) return;
