@@ -513,40 +513,62 @@ function setupTouch(mod, canvas, push, keyIndex) {
   const box = $('touch');
   box.hidden = false; document.body.classList.add('touch');
   log('touch controls on');
-  const held = {};                                     // key -> fingers on it
-  const press = (code, down) => {
-    const n = Math.max(0, (held[code] || 0) + (down ? 1 : -1)), was = held[code] || 0;
-    held[code] = n;
-    if ((was === 0) !== (n === 0)) { const idx = keyIndex[code]; if (idx >= 0) push(1, idx, n ? 1 : 0); }
-    for (const b of box.querySelectorAll(`[data-key="${code}"]`)) b.classList.toggle('on', n > 0);
+  // Which keys are down is worked out again from the fingers on the buttons at every event, never
+  // counted up and down: a lost touchend or pointerup (iOS drops them when its long-press text
+  // selection or callout takes over a touch) can then not leave a key stuck.
+  const fingers = new Map();                           // 't'+touch id or 'm'+pointer id -> key under it (or null)
+  let down = new Set();
+  const sync = () => {
+    const now = new Set([...fingers.values()].filter(Boolean));
+    for (const [set, d] of [[down, false], [now, true]]) for (const code of set) {
+      if ((d ? down : now).has(code)) continue;
+      const idx = keyIndex[code]; if (idx >= 0) push(1, idx, d ? 1 : 0);
+      for (const b of box.querySelectorAll(`[data-key="${code}"]`)) b.classList.toggle('on', d);
+    }
+    down = now;
   };
-  const fingers = new Map();                           // pointerId -> key under it (or null)
   const keyAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('#touch [data-key]')?.dataset.key || null;
+  // Fingers: touch events, on window so every touch anywhere re-reads the whole list. A finger
+  // counts from a touchstart on a button until it lifts, and presses whichever button it is over.
+  // preventDefault on touchstart is what stops iOS's long press (text selection, the callout, the
+  // magnifier); on pointerdown it doesn't.
+  const onButton = (t) => t instanceof Element && t.closest('#touch [data-key]');
+  const touches = (ev) => {
+    if (ev.type === 'touchstart') for (const t of ev.changedTouches) if (onButton(t.target)) fingers.set('t' + t.identifier, null);
+    if (ev.type === 'touchstart' && onButton(ev.target)) { ev.preventDefault(); try { getSelection()?.removeAllRanges(); } catch {} }
+    const live = new Map([...ev.touches].map((t) => ['t' + t.identifier, t]));
+    for (const id of fingers.keys()) {
+      if (id[0] !== 't') continue;
+      const t = live.get(id);
+      if (t) fingers.set(id, keyAt(t.clientX, t.clientY)); else fingers.delete(id);
+    }
+    sync();
+  };
+  for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) window.addEventListener(type, touches, { capture: true, passive: false });
+  // a mouse (?touch=1 on a computer): pointer events
   box.addEventListener('pointerdown', (ev) => {
     const b = ev.target.closest('[data-key]');
     if (!b) return;
     ev.preventDefault();
-    try { b.releasePointerCapture(ev.pointerId); } catch {}   // so the finger can slide to another button
-    fingers.set(ev.pointerId, b.dataset.key); press(b.dataset.key, true);
+    if (ev.pointerType !== 'mouse') return;            // fingers: the touch events above
+    try { b.releasePointerCapture(ev.pointerId); } catch {}   // so it can slide to another button
+    fingers.set('m' + ev.pointerId, b.dataset.key); sync();
   });
   window.addEventListener('pointermove', (ev) => {
-    if (!fingers.has(ev.pointerId)) return;
-    const was = fingers.get(ev.pointerId), now = keyAt(ev.clientX, ev.clientY);
-    if (now === was) return;
-    if (was) press(was, false);
-    if (now) press(now, true);
-    fingers.set(ev.pointerId, now);
+    const id = 'm' + ev.pointerId;
+    if (!fingers.has(id)) return;
+    fingers.set(id, keyAt(ev.clientX, ev.clientY)); sync();
   });
-  const lift = (ev) => {
-    if (!fingers.has(ev.pointerId)) return;
-    const was = fingers.get(ev.pointerId); fingers.delete(ev.pointerId);
-    if (was) press(was, false);
-  };
+  const lift = (ev) => { if (fingers.delete('m' + ev.pointerId)) sync(); };
   window.addEventListener('pointerup', lift);
   window.addEventListener('pointercancel', lift);
-  const releaseAll = () => { for (const [id, k] of fingers) { fingers.delete(id); if (k) press(k, false); } };
+  const releaseAll = () => { fingers.clear(); sync(); };
   document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+  window.addEventListener('blur', releaseAll);
+  window.addEventListener('pagehide', releaseAll);
   box.addEventListener('contextmenu', (ev) => ev.preventDefault());
+  // no text selection anywhere while playing (the start page's fields are hidden then)
+  document.addEventListener('selectstart', (ev) => { if (!ev.target?.closest?.('input, textarea')) ev.preventDefault(); });
 
   // the mouse: where the game's 640x480 picture is in the canvas (letterboxed like runtime/gpu.c).
   // The runtime multiplies mouse moves by 2.2 (runtime/dinput.c, mouse_scale) and the game's cursor
@@ -587,6 +609,10 @@ function setupTouch(mod, canvas, push, keyIndex) {
   };
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
+  // the same safety net for the cursor finger: no fingers left on the screen, so its button is up
+  const settle = (ev) => { if (cur && !ev.touches.length) up({ pointerId: cur.id }); };
+  window.addEventListener('touchend', settle, true);
+  window.addEventListener('touchcancel', settle, true);
 }
 
 // ------------------------------------------------------------------- controllers
@@ -687,8 +713,11 @@ let padsAtStart = 0;
 // ------------------------------------------------------------------- audio
 // The AudioContext is made inside the Start click (Safari only lets audio start during the
 // click itself, not after the awaits in start()); startAudio() then plugs the game into it.
+// iPhone: Web Audio counts as ringer sound, muted by the silent switch, unless the page says it
+// plays media (Safari 17+, navigator.audioSession); set before the context is made.
 let earlyAudio = null;
 function makeAudioContext() {
+  try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback'; } catch {}
   try {
     const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
     ctx.resume().catch(() => {});
@@ -705,14 +734,24 @@ async function startAudio(mod) {
   node.port.onmessage = (e) => { const { under, secs } = e.data; if (under > 0.05 * 44100 * secs) log(`audio: ${(under / 441 / secs).toFixed(0)}% silence over ${secs.toFixed(0)} s (game mixed too little)`); };
   const gain = new GainNode(ctx, { gain: Math.max(0, Math.min(100, Number(settings.volume) || 0)) / 100 });
   node.connect(gain).connect(ctx.destination);
-  log('audio context:', ctx.state, settings.volume !== 100 ? `(volume ${settings.volume}%)` : '');
-  ctx.onstatechange = () => log('audio context:', ctx.state);
-  // browsers keep audio suspended until a user gesture: never wait for it here
-  if (ctx.state !== 'running') {
-    log('audio waits for a click or key press');
-    const resume = () => ctx.resume().then(() => { for (const e of ['pointerdown', 'keydown']) window.removeEventListener(e, resume, true); });
-    for (const e of ['pointerdown', 'keydown']) window.addEventListener(e, resume, true);
-  }
+  log('audio context:', ctx.state, settings.volume !== 100 ? `(volume ${settings.volume}%)` : '', navigator.audioSession ? `(session ${navigator.audioSession.type})` : '');
+  // browsers keep audio suspended until a user gesture, and iOS stops it ("interrupted") for a
+  // call, Siri or switching apps: then the next touch, click or key press starts it again.
+  // Never wait for it here. Touches count as gestures on touchend, not on pointerdown.
+  const GESTURES = ['pointerdown', 'touchend', 'click', 'keydown'];
+  let armed = false;
+  const resume = () => ctx.resume().then(() => {
+    if (ctx.state !== 'running') return;
+    armed = false; for (const e of GESTURES) window.removeEventListener(e, resume, true);
+  }).catch(() => {});
+  const arm = () => {
+    if (armed || ctx.state === 'running' || ctx.state === 'closed') return;
+    armed = true; log('audio waits for a touch, click or key press');
+    for (const e of GESTURES) window.addEventListener(e, resume, true);
+  };
+  ctx.onstatechange = () => { log('audio context:', ctx.state); arm(); };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx.state !== 'running') { resume(); arm(); } });
+  arm();
   return ctx;
 }
 
