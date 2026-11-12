@@ -1,0 +1,60 @@
+{
+  "game": "NFS III",
+  "about": "What changed on nfs3.xyz, day by day. Kinds: new, improved, fixed. Days run 05:00 to 05:00 Polish time. tools/discord/changelog.mjs posts them to Discord.",
+  "days": [
+    { "date": "2026-11-12", "items": [
+      ["new", "Discord server for help, bug reports, ideas and finding races: Join our Discord in the menu."],
+      ["new", "What's New: this list of changes, day by day."]
+    ] },
+    { "date": "2026-11-11", "items": [
+      ["fixed", "iPhone: touch buttons no longer get stuck, and holding one no longer highlights text."],
+      ["fixed", "iPhone: sound plays with the silent switch on, and comes back after a call or switching apps."]
+    ] },
+    { "date": "2026-11-10", "items": [
+      ["new", "Lap Records on the start page: every racer's best lap on each track, in both directions, with tags for mirrored, night, weather and instant steering. Laps driven with mods on don't count."],
+      ["new", "Phones and tablets: on-screen buttons to steer, brake and accelerate; a finger on the picture works as the mouse."],
+      ["new", "iPhone: the game files now save on iOS 18, and the page shows how to get fullscreen with Add to Home Screen."],
+      ["new", "Instant steering (Game Settings): the wheels turn to full lock at once, like with a joystick back in the day."],
+      ["improved", "The graphics options list every mode as 32-bit colour, which is how the game is actually drawn."]
+    ] },
+    { "date": "2026-11-09", "items": [
+      ["fixed", "The game no longer runs out of memory after about 30 races in one session."],
+      ["improved", "Browsers without WebGL 2 (hardware acceleration off) get a clear message before anything downloads."],
+      ["new", "Links to the sister sites: nfs2se.xyz (NFS II SE) and nfs4.xyz (High Stakes)."]
+    ] },
+    { "date": "2026-11-08", "items": [
+      ["new", "Game Settings on the start page: fullscreen, FPS counter, intro movies, unlocks, controllers, resolution, sharpness and volume."],
+      ["new", "Mods switch: rata_536's remastered cars, police and traffic cars and loading screens, on or off with one click."],
+      ["fixed", "Long online sessions no longer crash with an out-of-memory error."],
+      ["improved", "The game runs in one tab at a time; a second tab used to break the download."],
+      ["improved", "The server and online rooms are better protected against abuse."]
+    ] },
+    { "date": "2026-11-07", "items": [
+      ["new", "Widescreen and HD: 16:9 and 16:10 modes up to 3840×2160. The game starts in the biggest mode that fits your screen."],
+      ["new", "Gamepads and steering wheels, set up in the game's own Options › Controllers."],
+      ["new", "Everything unlocked from the start: the bonus cars and Empire City."],
+      ["new", "Fullscreen button in the corner, and Alt+Enter."],
+      ["new", "The start page now looks like the game's 1998 main menu, with new icons."],
+      ["improved", "Smoother online races: your car reacts at once even when someone else hosts."],
+      ["improved", "Full frame rate in browsers on Windows (it was stuck at 25 to 30 fps)."],
+      ["fixed", "Crackling, robotic sound."],
+      ["fixed", "Game downloads in Safari came out damaged. Damaged downloads are now found and repaired."],
+      ["fixed", "A black screen at start caused by the intro movies; they are skipped by default."],
+      ["fixed", "After an update, the browser could mix old and new files and crash."]
+    ] },
+    { "date": "2026-11-06", "items": [
+      ["new", "nfs3.xyz is public: the game files download automatically, once, and Start is one click after that."],
+      ["new", "Online lobby: a room browser, named rooms with passwords, and invite links."],
+      ["new", "Your lobby name is your name in the game."],
+      ["new", "The start page shows who is online and racing, the most active racers, and a daily race at 20:00 with notifications."],
+      ["new", "Races in 800×600 and 1024×768 instead of only 640×480."],
+      ["improved", "Online: lost packets are recovered, and the best-host pick looks at frame rate as well as ping."],
+      ["improved", "When a newer version is on the server, the page offers a reload."],
+      ["fixed", "A black screen at start in Safari when the browser held the sound back."]
+    ] },
+    { "date": "2026-11-05", "items": [
+      ["new", "First version: Need for Speed III: Hot Pursuit (with VEG's Modern Patch) recompiled to WebAssembly and drawn with WebGL 2."],
+      ["new", "Online races in the browser: the game's LAN (IPX) mode over direct browser-to-browser links, with a relay when those can't connect."]
+    ] }
+  ]
+}
