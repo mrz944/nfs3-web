@@ -273,11 +273,15 @@ async function writeBytes(dir, name, bytes) { await writeFile(dir, name, exact(b
 // Game Settings on the start page, kept in this browser (localStorage nfs3.settings) and used
 // when the game starts: intro movies (nfs3.ini NoMovies), fullscreen, the fps counter, the
 // resolutions the game offers (RT_SCREEN, glide.c), the render scale (gpu.c), unlocks
-// (RT_LOCKED, game.c), instant steering (RT_INSTANT_STEER, game.c), controllers and volume.
-const SETTINGS_DEFAULT = { fullscreen: false, fps: false, movies: false, unlock: true, instant: false, pads: false, screen: '1920x1080', quality: '1', volume: 100 };
+// (RT_LOCKED, game.c), instant steering (RT_INSTANT_STEER, game.c), controllers, volume and the
+// touch controls (setupTouch: steering, size, side, gear buttons; on phones and tablets only).
+const SETTINGS_DEFAULT = { fullscreen: false, fps: false, movies: false, unlock: true, instant: false, pads: false, screen: '1920x1080', quality: '1', volume: 100,
+  touchSteer: 'buttons', touchSize: 'auto', touchSwap: false, touchGears: false };
 const settings = { ...SETTINGS_DEFAULT };
 try { Object.assign(settings, JSON.parse(localStorage.getItem('nfs3.settings') || '{}')); } catch {}
+const saveSettings = () => { try { localStorage.setItem('nfs3.settings', JSON.stringify(settings)); } catch {} };
 function setupSettings() {
+  document.body.classList.toggle('touchdev', touchDevice());
   const els = [...document.querySelectorAll('[data-set]')];
   const auto = screenPixels().replace('x', '×');
   $('set-screen-auto').textContent = `Up to this screen (${auto})`;
@@ -286,7 +290,7 @@ function setupSettings() {
     $('set-volume-out').textContent = `${settings.volume}%`;
     watchPads.show?.();
   };
-  const save = () => { try { localStorage.setItem('nfs3.settings', JSON.stringify(settings)); } catch {} };
+  const save = saveSettings;
   for (const el of els) el.addEventListener(el.type === 'range' ? 'input' : 'change', () => {
     const k = el.dataset.set;
     settings[k] = el.type === 'checkbox' ? el.checked : el.type === 'range' ? Number(el.value) : el.value;
@@ -495,80 +499,212 @@ function attachInput(mod, canvas) {
   canvas.addEventListener('mouseup', (ev) => { if (document.pointerLockElement === canvas) push(3, ev.button === 2 ? 3 : 1, 0); });
   canvas.addEventListener('wheel', (ev) => { push(4, ev.deltaY < 0 ? 120 : -120, 0); ev.preventDefault(); }, { passive: false });
   canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
-  if (touchWanted()) setupTouch(mod, canvas, push, keyIndex);
+  if (touchDevice()) setupTouch(mod, canvas, push, keyIndex);
   return (code, down) => { const idx = keyIndex[code]; if (idx !== undefined && idx >= 0) push(1, idx, down ? 1 : 0); };
 }
 
 // ------------------------------------------------------------------- touch
-// Phones and tablets: on-screen buttons over the game, held down like keys (arrows steer, gas and
-// brake, and also move through the menus; OK = Enter, ESC = Esc, HB = handbrake). A finger can slide
-// from one button to the next. A finger on the picture itself is the mouse: the cursor jumps to it,
-// follows it, and lifting it clicks. ?touch=1 shows the buttons anywhere, ?touch=0 hides them.
-function touchWanted() {
+// Phones and tablets: controls over the game. The game takes them as its controller (touchPad,
+// written by writePads like a gamepad): steering on the X axis, -1..1, so the thumb stick and
+// tilting the phone steer gently or hard and the buttons at full lock; gas and brake on Y; the
+// handbrake and the rest as the game's default joystick buttons (Options › Controllers with a
+// controller: A handbrake, B camera, C/D shift up/down, E horn, F reset; look behind stays on the
+// keyboard's B). Each control also sends its key: the menus only listen to the keyboard, and
+// while the controller is player 1 driving ignores the arrow keys, so both can go out together.
+// With a real controller connected at start the game gets that one, and the touch controls hide.
+// A finger on the picture itself is the mouse: the cursor jumps to it, follows it, and lifting it
+// clicks. ?touch=1 shows the controls anywhere, ?touch=0 hides them.
+function touchDevice() {
   const q = new URLSearchParams(location.search).get('touch');
   if (q != null) return q !== '0';
   return navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches;
 }
+const touchWanted = () => touchDevice() && settings.touchSteer !== 'off';
+const touchPad = { on: false, x: 0, gas: 0, brake: 0, buttons: 0 };   // controller 1 when on (writePads)
+const STEER_MODES = ['buttons', 'stick', 'tilt'];
+const STEER_NAME = { buttons: 'buttons', stick: 'thumb stick', tilt: 'tilt' };
+// keys: sent as keys; bit: the controller's button; group: a finger slides between these
+const CTL = {
+  left: { keys: ['ArrowLeft'], group: 'steer' }, right: { keys: ['ArrowRight'], group: 'steer' },
+  gas: { keys: ['ArrowUp'], group: 'pedal' }, brake: { keys: ['ArrowDown'], group: 'pedal' }, hb: { keys: ['Space'], bit: 0, group: 'pedal' },
+  ok: { keys: ['Enter'] }, esc: { keys: ['Escape'] }, look: { keys: ['KeyB'] },
+  cam: { bit: 1 }, gup: { bit: 2 }, gdown: { bit: 3 }, horn: { bit: 4 }, reset: { bit: 5 },
+  mode: { tap: true }, center: { tap: true },
+};
+const MIN_HOLD = 90;          // ms: a quick tap still lasts a few of the game's frames
+const STICK = 64;             // px (at size 1) from where the thumb landed to full lock
+const TILT_FULL = 28;         // degrees of turning the phone to full lock (after a 2 degree dead zone)
+const STEER_ICON = {
+  buttons: '<path d="M10 7l-5 5 5 5M14 7l5 5-5 5"/>',
+  stick: '<circle cx="12" cy="12" r="8"/><circle class="fill" cx="12" cy="12" r="3"/>',
+  tilt: '<rect x="4" y="8" width="16" height="9" rx="2" transform="rotate(-18 12 12)"/>',
+};
+// iPhone asks once before a page may read the motion sensor, and only from a tap (Start, or the
+// steering button): a refusal that came from outside a tap is asked again next time
+let tiltAsk = null;
+function askTilt() {
+  const D = typeof DeviceOrientationEvent === 'undefined' ? null : DeviceOrientationEvent;
+  if (typeof D?.requestPermission !== 'function') return Promise.resolve(true);
+  if (!tiltAsk) tiltAsk = D.requestPermission().then((r) => r === 'granted', () => { tiltAsk = null; return false; });
+  return tiltAsk;
+}
 function setupTouch(mod, canvas, push, keyIndex) {
   const box = $('touch');
-  box.hidden = false; document.body.classList.add('touch');
-  log('touch controls on');
-  // Which keys are down is worked out again from the fingers on the buttons at every event, never
-  // counted up and down: a lost touchend or pointerup (iOS drops them when its long-press text
-  // selection or callout takes over a touch) can then not leave a key stuck.
-  const fingers = new Map();                           // 't'+touch id or 'm'+pointer id -> key under it (or null)
-  let down = new Set();
-  const sync = () => {
-    const now = new Set([...fingers.values()].filter(Boolean));
-    for (const [set, d] of [[down, false], [now, true]]) for (const code of set) {
-      if ((d ? down : now).has(code)) continue;
-      const idx = keyIndex[code]; if (idx >= 0) push(1, idx, d ? 1 : 0);
-      for (const b of box.querySelectorAll(`[data-key="${code}"]`)) b.classList.toggle('on', d);
-    }
-    down = now;
+  document.body.classList.add('touch');
+  box.hidden = !touchPad.on;
+  let steer = STEER_MODES.includes(settings.touchSteer) ? settings.touchSteer : 'buttons';
+  log(touchPad.on ? `touch controls on, the game's controller: steering with ${STEER_NAME[steer]}` : 'touch controls hidden: a controller was connected at start (or they are off); a finger on the picture is the mouse');
+
+  // size: the setting (Auto: by the screen), never more than fits beside and above each other
+  const size = () => {
+    const auto = Math.max(0.8, Math.min(1.25, Math.min(innerWidth, innerHeight) / 390));
+    const want = settings.touchSize === 'auto' ? auto : Number(settings.touchSize) || 1;
+    const fit = Math.min((innerWidth - 64) / 344, (innerHeight - 40) / 252);
+    box.style.setProperty('--ts', Math.max(0.6, Math.min(want, fit)).toFixed(3));
   };
-  const keyAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('#touch [data-key]')?.dataset.key || null;
-  // Fingers: touch events, on window so every touch anywhere re-reads the whole list. A finger
-  // counts from a touchstart on a button until it lifts, and presses whichever button it is over.
-  // preventDefault on touchstart is what stops iOS's long press (text selection, the callout, the
-  // magnifier); on pointerdown it doesn't.
-  const onButton = (t) => t instanceof Element && t.closest('#touch [data-key]');
+  size(); addEventListener('resize', size);
+  box.toggleAttribute('data-swap', !!settings.touchSwap);
+  box.toggleAttribute('data-gears', !!settings.touchGears);
+  const toastEl = box.querySelector('.ttoast'); let toastT = 0;
+  const toast = (t, ms = 3000) => { toastEl.textContent = t; toastEl.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { toastEl.hidden = true; }, ms); };
+
+  // What is pressed is worked out again from the fingers at every event, never counted up and
+  // down: a lost touchend (iOS drops them when its long-press text selection or callout takes
+  // over a touch) can then not leave anything stuck.
+  const fingers = new Map();          // 't'+touch id or 'm'+pointer id -> { ctl, x0 (the stick: where it landed) }
+  const held = new Map();             // ctl -> when it went down (what the game has now)
+  let releaseT = 0;
+  const stickEl = box.querySelector('.tstick'), knob = stickEl.querySelector('i');
+  const stick = { x: 0 };
+  const tilt = { x: 0, phi: null, center: null, heard: false, check: 0 };
+  const unit = () => STICK * (parseFloat(box.style.getPropertyValue('--ts')) || 1);
+  const pad = () => {
+    touchPad.gas = held.has('gas') ? 1 : 0; touchPad.brake = held.has('brake') ? 1 : 0;
+    touchPad.x = steer === 'stick' ? stick.x : steer === 'tilt' ? tilt.x : (held.has('right') ? 1 : 0) - (held.has('left') ? 1 : 0);
+  };
+  const send = (c, down) => {
+    const k = CTL[c]; if (!k) return;
+    for (const code of k.keys || []) { const i = keyIndex[code]; if (i >= 0) push(1, i, down ? 1 : 0); }
+    if (k.bit !== undefined) touchPad.buttons = down ? touchPad.buttons | (1 << k.bit) : touchPad.buttons & ~(1 << k.bit);
+    for (const b of box.querySelectorAll(`[data-ctl="${c}"]`)) b.classList.toggle('on', down);
+    if (!down) return;
+    try { navigator.vibrate?.(8); } catch {}
+    if (c === 'mode') queueMicrotask(nextSteer);              // after this sync is done
+    if (c === 'center') { tilt.center = tilt.phi; toast('Straight ahead is how the phone is held now.', 2000); }
+  };
+  const sync = () => {
+    const now = performance.now(), want = new Set();
+    for (const f of fingers.values()) if (f.ctl && f.ctl !== 'stick') want.add(f.ctl);
+    if (stick.x < -0.5) want.add('left');                       // the stick works the menus' arrows too
+    if (stick.x > 0.5) want.add('right');
+    for (const [c, t] of held) {
+      if (want.has(c)) continue;
+      if (now - t < MIN_HOLD) { clearTimeout(releaseT); releaseT = setTimeout(sync, MIN_HOLD - (now - t) + 1); continue; }
+      held.delete(c); send(c, false);
+    }
+    for (const c of want) if (!held.has(c)) { held.set(c, now); send(c, true); }
+    pad();
+  };
+  const stickTo = (dx) => {
+    const u = unit();
+    stick.x = dx == null ? 0 : Math.max(-1, Math.min(1, dx / u));
+    knob.style.setProperty('--dx', `${(stick.x * u).toFixed(1)}px`);
+    stickEl.classList.toggle('on', dx != null);
+  };
+  const ctlOf = (el) => (el instanceof Element ? el.closest('#touch [data-ctl]') : null);
+  const ctlAt = (x, y) => ctlOf(document.elementFromPoint(x, y))?.dataset.ctl || null;
+  // a finger keeps its control when it drifts off it, and slides to its neighbour (left and
+  // right, gas, brake and handbrake)
+  const slide = (cur, over) => (over && over !== cur && CTL[cur]?.group && CTL[over]?.group === CTL[cur].group ? over : cur);
+  const land = (id, el, x) => {
+    const c = el.dataset.ctl;
+    if (c !== 'stick') { fingers.set(id, { ctl: c }); return; }
+    if (![...fingers.values()].some((f) => f.ctl === 'stick')) fingers.set(id, { ctl: 'stick', x0: x });
+  };
+  const moved = (f, x, y) => { if (f.ctl === 'stick') stickTo(x - f.x0); else f.ctl = slide(f.ctl, ctlAt(x, y)); };
+  const refresh = () => { if (![...fingers.values()].some((f) => f.ctl === 'stick')) stickTo(null); sync(); };
+
+  // fingers: touch events, on window so every touch anywhere re-reads the whole list.
+  // preventDefault on touchstart is what stops iOS's long press (text selection, the callout,
+  // the magnifier); on pointerdown it doesn't.
   const touches = (ev) => {
-    if (ev.type === 'touchstart') for (const t of ev.changedTouches) if (onButton(t.target)) fingers.set('t' + t.identifier, null);
-    if (ev.type === 'touchstart' && onButton(ev.target)) { ev.preventDefault(); try { getSelection()?.removeAllRanges(); } catch {} }
+    if (ev.type === 'touchstart') {
+      for (const t of ev.changedTouches) { const el = ctlOf(t.target); if (el) land('t' + t.identifier, el, t.clientX); }
+      if (ctlOf(ev.target)) { ev.preventDefault(); try { getSelection()?.removeAllRanges(); } catch {} }
+    }
     const live = new Map([...ev.touches].map((t) => ['t' + t.identifier, t]));
-    for (const id of fingers.keys()) {
+    for (const [id, f] of fingers) {
       if (id[0] !== 't') continue;
       const t = live.get(id);
-      if (t) fingers.set(id, keyAt(t.clientX, t.clientY)); else fingers.delete(id);
+      if (t) moved(f, t.clientX, t.clientY); else fingers.delete(id);
     }
-    sync();
+    refresh();
+    if (ev.type === 'touchend' && steer === 'tilt' && !tilt.heard) askTilt().then((ok) => { if (ok) tiltOn(); });   // a tap: iPhone may ask now
   };
   for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) window.addEventListener(type, touches, { capture: true, passive: false });
   // a mouse (?touch=1 on a computer): pointer events
   box.addEventListener('pointerdown', (ev) => {
-    const b = ev.target.closest('[data-key]');
-    if (!b) return;
+    const el = ctlOf(ev.target);
+    if (!el) return;
     ev.preventDefault();
     if (ev.pointerType !== 'mouse') return;            // fingers: the touch events above
-    try { b.releasePointerCapture(ev.pointerId); } catch {}   // so it can slide to another button
-    fingers.set('m' + ev.pointerId, b.dataset.key); sync();
+    try { el.releasePointerCapture(ev.pointerId); } catch {}   // so it can slide to another button
+    land('m' + ev.pointerId, el, ev.clientX); refresh();
   });
-  window.addEventListener('pointermove', (ev) => {
-    const id = 'm' + ev.pointerId;
-    if (!fingers.has(id)) return;
-    fingers.set(id, keyAt(ev.clientX, ev.clientY)); sync();
-  });
-  const lift = (ev) => { if (fingers.delete('m' + ev.pointerId)) sync(); };
+  window.addEventListener('pointermove', (ev) => { const f = fingers.get('m' + ev.pointerId); if (f) { moved(f, ev.clientX, ev.clientY); refresh(); } });
+  const lift = (ev) => { if (fingers.delete('m' + ev.pointerId)) refresh(); };
   window.addEventListener('pointerup', lift);
   window.addEventListener('pointercancel', lift);
-  const releaseAll = () => { fingers.clear(); sync(); };
+  const releaseAll = () => { fingers.clear(); refresh(); };
   document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
   window.addEventListener('blur', releaseAll);
   window.addEventListener('pagehide', releaseAll);
   box.addEventListener('contextmenu', (ev) => ev.preventDefault());
   // no text selection anywhere while playing (the start page's fields are hidden then)
   document.addEventListener('selectstart', (ev) => { if (!ev.target?.closest?.('input, textarea')) ev.preventDefault(); });
+
+  // tilt: steering is how far the phone is turned (like a wheel, about the screen's axis) from
+  // where it was held when tilt began or Straight ahead was pressed. The up direction, seen from
+  // the phone (W3C deviceorientation beta and gamma), turns the other way to the phone; the
+  // screen's own rotation only adds a constant, so portrait and either landscape read the same.
+  const onOrient = (e) => {
+    if (e.beta == null || e.gamma == null) return;
+    tilt.heard = true;
+    const b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+    const ux = -Math.cos(b) * Math.sin(g), uy = Math.sin(b);
+    if (Math.hypot(ux, uy) < 0.3) return;                   // lying nearly flat: no wheel to read
+    const phi = Math.atan2(ux, uy);
+    tilt.phi = phi;
+    if (tilt.center == null) tilt.center = phi;
+    let d = (tilt.center - phi) * 180 / Math.PI;
+    if (d > 180) d -= 360; else if (d < -180) d += 360;
+    const v = Math.abs(d) < 2 ? 0 : Math.sign(d) * Math.min(1, (Math.abs(d) - 2) / TILT_FULL);
+    tilt.x = tilt.x * 0.4 + v * 0.6;
+    if (steer === 'tilt') pad();
+  };
+  const tiltOn = () => {
+    removeEventListener('deviceorientation', onOrient); addEventListener('deviceorientation', onOrient);
+    clearTimeout(tilt.check);
+    tilt.check = setTimeout(() => { if (!tilt.heard && steer === 'tilt') toast("Tilt can't read the motion sensor in this browser. The round button at the top right switches to buttons.", 6000); }, 2500);
+  };
+  const tiltOff = () => { removeEventListener('deviceorientation', onOrient); clearTimeout(tilt.check); tilt.x = 0; };
+  const apply = () => {
+    box.dataset.steer = steer;
+    box.querySelector('.c-mode').innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${STEER_ICON[steer]}</svg>`;
+    for (const [id, f] of fingers) if (f.ctl === 'stick' || CTL[f.ctl]?.group === 'steer') fingers.delete(id);
+    stickTo(null);
+    if (steer === 'tilt') { tilt.center = null; tiltOn(); } else tiltOff();
+    sync();
+  };
+  const nextSteer = () => {
+    steer = STEER_MODES[(STEER_MODES.indexOf(steer) + 1) % STEER_MODES.length];
+    settings.touchSteer = steer; saveSettings();
+    log(`touch controls: steering with ${STEER_NAME[steer]}`);
+    toast(steer === 'tilt' ? 'Steering: tilt. Hold the phone like a wheel; the button beside this one sets straight ahead.'
+      : steer === 'stick' ? 'Steering: thumb stick. Put your thumb down anywhere on it and slide.' : 'Steering: buttons.', steer === 'tilt' ? 5000 : 3000);
+    apply();
+  };
+  apply();
 
   // the mouse: where the game's 640x480 picture is in the canvas (letterboxed like runtime/gpu.c).
   // The runtime multiplies mouse moves by 2.2 (runtime/dinput.c, mouse_scale) and the game's cursor
@@ -668,21 +804,26 @@ function padState(p) {
 }
 let padSeq = 0;
 const padPrev = { start: false, arrows: [false, false, false, false] };
+const touchState = () => {
+  const axes = new Float32Array(8);
+  axes[0] = touchPad.x; axes[1] = clamp1(touchPad.brake - touchPad.gas); axes[2] = touchPad.gas; axes[5] = touchPad.brake;
+  return { wheel: false, axes, buttons: touchPad.buttons, pov: -1 };
+};
 function writePads(mod, key) {
   const base = mod._rt_web_pads?.(); if (!base) return;
-  const dv = new DataView(mod.HEAPU8.buffer), pads = padList();
+  const dv = new DataView(mod.HEAPU8.buffer), pads = touchPad.on ? [null, ...padList()] : padList();   // null: the touch controls
   padSeq++;
   for (let k = 0; k < 2; k++) {
-    const o = base + k * PAD_BYTES, p = pads[k];
+    const o = base + k * PAD_BYTES, p = pads[k], touch = k === 0 && touchPad.on;
     dv.setUint32(o, padSeq, true);
-    if (!p) { dv.setUint32(o + 4, 0, true); continue; }
-    const s = padState(p);
+    if (!p && !touch) { dv.setUint32(o + 4, 0, true); continue; }
+    const s = touch ? touchState() : padState(p);
     dv.setUint32(o + 4, 1, true); dv.setUint32(o + 8, s.wheel ? 1 : 0, true);
     for (let i = 0; i < 8; i++) dv.setFloat32(o + 12 + 4 * i, s.axes[i], true);
     dv.setUint32(o + 44, s.buttons >>> 0, true); dv.setInt32(o + 48, s.pov, true);
-    const name = new TextEncoder().encode(padName(p).replace(/[^\x20-\x7e]/g, '')).slice(0, 63);
+    const name = new TextEncoder().encode(touch ? 'Touch controls' : padName(p).replace(/[^\x20-\x7e]/g, '')).slice(0, 63);
     mod.HEAPU8.set(name, o + 52); mod.HEAPU8[o + 52 + name.length] = 0;
-    if (k === 0 && key && p.mapping === 'standard') {              // Start pauses; the d-pad works the menus
+    if (k === 0 && key && p?.mapping === 'standard') {              // Start pauses; the d-pad works the menus
       const start = !!p.buttons[9]?.pressed;
       if (start !== padPrev.start) { key('Escape', start); padPrev.start = start; }
       ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].forEach((c, i) => {
@@ -787,6 +928,10 @@ async function start() {
   $('start').disabled = true;
   mark('click');
   padsAtStart = padList().length;
+  // phones: the touch controls are the game's controller, unless a real one is connected
+  touchPad.on = touchWanted() && !padsAtStart;
+  if (touchPad.on && settings.touchSteer === 'tilt') askTilt();      // still inside the Start tap
+  if (touchPad.on) log(`touch controls are the game's controller 1 (steering: ${settings.touchSteer})`);
   if (padsAtStart) log(`controllers for the game: ${padList().map((p) => `${padName(p)} (${p.mapping || 'raw'}${isWheel(p) ? ', wheel' : ''})`).join(', ')}`);
   status('Loading the recompiled game…');
   log('settings:', Object.entries(settings).map(([k, v]) => `${k}=${v}`).join(' '));
