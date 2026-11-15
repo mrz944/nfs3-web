@@ -77,6 +77,7 @@ static void trace_pkt(const char *dir, const uint8_t node[6], uint16_t dport, ui
 static void transport_send(const uint8_t dst[6], const uint8_t *pkt, int len);
 
 static void deliver_now(const uint8_t src[6], const uint8_t *p, int len);
+static void pace_log(void);
 /* RT_NET_DELAY=ms: hold incoming packets that long (testing a link's latency natively) */
 #define DQ 1024
 static struct { double due; uint8_t src[6]; uint16_t len; uint8_t p[MAXPKT + 4]; } dq[DQ];
@@ -101,14 +102,16 @@ void net_deliver(const uint8_t src[6], const uint8_t *p, int len) {
     static double loss = -1;            /* RT_NET_LOSS=percent: drop incoming packets (testing) */
     if (loss < 0) { const char *e = getenv("RT_NET_LOSS"); loss = e ? atof(e) / 100.0 : 0; }
     if (loss > 0 && (double)rand() / RAND_MAX < loss) { stats.drop++; return; }
+    static double jitter = -1;          /* RT_NET_JITTER=ms: plus up to that much more, at random (no reordering) */
     if (net_delay < 0) {
         const char *e = getenv("RT_NET_DELAY"); net_delay = e ? atof(e) / 1000.0 : 0;
-        if (net_delay > 0) { pthread_t t; pthread_create(&t, NULL, delay_main, NULL); }
+        const char *j = getenv("RT_NET_JITTER"); jitter = j ? atof(j) / 1000.0 : 0;
+        if (net_delay > 0 || jitter > 0) { pthread_t t; pthread_create(&t, NULL, delay_main, NULL); }
     }
-    if (net_delay > 0 && len <= MAXPKT + 4) {
+    if ((net_delay > 0 || jitter > 0) && len <= MAXPKT + 4) {
         pthread_mutex_lock(&dq_mu);
         if ((dq_h + 1) % DQ != dq_t) {
-            dq[dq_h].due = tnow() + net_delay; memcpy(dq[dq_h].src, src, 6); dq[dq_h].len = (uint16_t)len; memcpy(dq[dq_h].p, p, (size_t)len);
+            dq[dq_h].due = tnow() + net_delay + jitter * rand() / RAND_MAX; memcpy(dq[dq_h].src, src, 6); dq[dq_h].len = (uint16_t)len; memcpy(dq[dq_h].p, p, (size_t)len);
             dq_h = (dq_h + 1) % DQ; pthread_cond_signal(&dq_cv);
         }
         pthread_mutex_unlock(&dq_mu);
@@ -129,14 +132,19 @@ void net_deliver(const uint8_t src[6], const uint8_t *p, int len) {
  *    game is the authority for its own car and the host's for the AI cars: about
  *    30 times a second each one sends those cars' physics state (position,
  *    velocity, orientation, spin) and the others overwrite theirs. The host moves
- *    a client's car ahead by half the round trip (it's that old when it arrives).
+ *    a client's car ahead by the time it took to arrive (half the round trip to
+ *    that player, from the page: rt_net_peer_rtt).
+ * 3. A position error is taken out over a few updates rather than at once, so a
+ *    car whose player's computer froze for a moment (its updates stop, then say it
+ *    is somewhere else) slides back into place instead of jumping.
  * RT_NETSYNC=0 turns both off.
  *
  * Game packets ("\xEAdat"): fe, payload length, seq, ack, CRC-16 (BE), payload.
  * A client's controls: payload 06 00 + 4 bytes; a bundle: 06 + 8 blocks of 4 (player
  * k in block k). CRC: reflected, table at 0x566b54 (poly 0xA001), init 0xFBEA, over
  * the bytes from fe on with the CRC bytes zero. Cars: 8 pointers at 0x5efac8, car k
- * = player k, then the AI; physics state at +0x98 (88 bytes). */
+ * = player k, then the AI; physics state at +0x98 (88 bytes). Our state packets (socket
+ * 0x7ea5): 'S' 'Y', sender's car, count, sender's clock (u32 ms), then count x (car, 88 bytes). */
 #define CAR_TABLE 0x5efac8u
 #define CAR_STATE 0x98u
 #define CAR_BYTES 88
@@ -149,9 +157,42 @@ static uint8_t my_ctl[4]; static uint8_t sent_ctl[256][4]; static double sent_t[
 static int slot_votes[8], votes_n;
 static double rtt_s = 0.1;               /* host: round trip to the clients (min over recent acks) */
 static double bundle_t[256];
-static struct { int have; double t; uint8_t st[CAR_BYTES]; } remote[8];
+static struct { int have; double t; float lat; uint8_t st[CAR_BYTES]; } remote[8];
 static double human_seen[8];             /* host: a client's state for this car arrived (it owns it) */
 static pthread_mutex_t sync_mu = PTHREAD_MUTEX_INITIALIZER;
+/* each peer's one-way delay to us in seconds (half its round trip, from the page); natively the
+ * simulated RT_NET_DELAY; -1 when not known */
+static struct { uint8_t node[6]; float s; int32_t dmin[2]; double win_t; } peer_lat[16];
+static int peer_lat_n;
+static int peer_lat_slot(const uint8_t node[6]) {
+    int i = 0;
+    while (i < peer_lat_n && memcmp(peer_lat[i].node, node, 6)) i++;
+    if (i == peer_lat_n) { if (peer_lat_n == 16) i = 0; else peer_lat_n++; memcpy(peer_lat[i].node, node, 6); peer_lat[i].s = -1.0f; peer_lat[i].dmin[0] = peer_lat[i].dmin[1] = INT32_MAX; peer_lat[i].win_t = 0; }
+    return i;
+}
+static float lat_of(const uint8_t node[6]) {
+    for (int i = 0; i < peer_lat_n; i++) if (!memcmp(peer_lat[i].node, node, 6)) return peer_lat[i].s;
+    return net_delay > 0 ? (float)net_delay : -1.0f;
+}
+/* How much longer than usual a packet took: it carries the sender's clock in ms; the least
+ * (ours - theirs) seen lately is the quickest trip (plus the clock difference, which cancels),
+ * so anything above it is queueing on the way, and the car is that much further on. Two 8 s
+ * windows, so a drifting clock or a route change is forgotten soon enough. */
+static float extra_delay(const uint8_t node[6], uint32_t sent_ms, double now) {
+    int i = peer_lat_slot(node);
+    int32_t d = (int32_t)((uint32_t)(now * 1000.0) - sent_ms);
+    if (now - peer_lat[i].win_t > 8.0) { peer_lat[i].win_t = now; peer_lat[i].dmin[1] = peer_lat[i].dmin[0]; peer_lat[i].dmin[0] = INT32_MAX; }
+    if (d < peer_lat[i].dmin[0]) peer_lat[i].dmin[0] = d;
+    int32_t m = peer_lat[i].dmin[1] < peer_lat[i].dmin[0] ? peer_lat[i].dmin[1] : peer_lat[i].dmin[0];
+    int32_t x = d - m;
+    return x > 0 && x < 1000 ? (float)x / 1000.0f : 0.0f;
+}
+static void set_peer_rtt(const uint8_t node[6], double rtt) {
+    pthread_mutex_lock(&sync_mu);
+    int i = peer_lat_slot(node);
+    peer_lat[i].s = rtt > 0 && rtt < 2.0 ? (float)(rtt * 0.5) : -1.0f;
+    pthread_mutex_unlock(&sync_mu);
+}
 
 static uint16_t game_crc(const uint8_t *p, int n) {
     uint16_t c = 0xFBEA;
@@ -211,16 +252,19 @@ static void sync_in(uint8_t *d, int n) {
     pthread_mutex_unlock(&sync_mu);
 }
 /* another player's car states (network thread) */
-static void sync_state_in(const uint8_t *d, int n) {
+static void sync_state_in(const uint8_t src[6], const uint8_t *d, int n) {
     if (!sync_enabled() || n < 4 || d[0] != 'S' || d[1] != 'Y') return;
     int from = d[2], cnt = d[3];
-    if (n < 4 + cnt * (1 + CAR_BYTES)) return;
+    if (n < 8 + cnt * (1 + CAR_BYTES)) return;
+    uint32_t sent_ms; memcpy(&sent_ms, d + 4, 4);
     pthread_mutex_lock(&sync_mu);
     double now = tnow();
+    float extra = extra_delay(src, sent_ms, now);
     for (int i = 0; i < cnt; i++) {
-        const uint8_t *e = d + 4 + i * (1 + CAR_BYTES); int k = e[0];
+        const uint8_t *e = d + 8 + i * (1 + CAR_BYTES); int k = e[0];
         if (k > 7 || k == (am_host ? 0 : my_slot)) continue;        /* never overwrite my own car */
         remote[k].have = 1; remote[k].t = now; memcpy(remote[k].st, e + 1, CAR_BYTES);
+        float lat = lat_of(src); remote[k].lat = lat < 0 ? lat : lat + extra;
         if (k == from && am_host) human_seen[k] = now;
     }
     pthread_mutex_unlock(&sync_mu);
@@ -240,16 +284,25 @@ void net_frame(void) {
             pthread_mutex_lock(&sync_mu);
             my_slot = -1; am_host = am_client = 0; memset(human_seen, 0, sizeof human_seen); memset(sent_t, 0, sizeof sent_t);
             pthread_mutex_unlock(&sync_mu);
+            pace_log();
         }
         return;
     }
     if (!car_ptr(0)) return;
     int me = am_host ? 0 : my_slot;
     if (me < 0) return;
+    {   /* RT_NET_STALL=every_ms:ms (testing): freeze this game now and then, like a slow computer */
+        static double every = -1, len, last;
+        if (every < 0) { const char *e = getenv("RT_NET_STALL"); every = e ? atof(e) / 1000.0 : 0; len = e && strchr(e, ':') ? atof(strchr(e, ':') + 1) / 1000.0 : 0; }
+        if (every > 0 && now - last >= every) { if (last > 0) { rt_log("net: test stall %.0f ms", len * 1000); usleep((useconds_t)(len * 1e6)); now = tnow(); } last = now; }
+    }
+    static float ahead = -1;                  /* RT_SYNC_AHEAD (testing): how much of the delay to move a car ahead by */
+    if (ahead < 0) { const char *e = getenv("RT_SYNC_AHEAD"); ahead = e ? (float)atof(e) : 1.0f; }
+    static int old_rule = -1; if (old_rule < 0) old_rule = getenv("RT_SYNC_SNAP") != NULL;
     static double last_send;
     if (now - last_send >= 0.030) {
         last_send = now;
-        uint8_t pkt[4 + 4 + 8 * (1 + CAR_BYTES)]; int cnt = 0, o = 8;
+        uint8_t pkt[4 + 8 + 8 * (1 + CAR_BYTES)]; int cnt = 0, o = 12;
         for (int k = 0; k < 8; k++) {
             uint32_t c = car_ptr(k); if (!c) continue;
             int mine = k == me || (am_host && k != 0 && now - human_seen[k] > 2.0);
@@ -258,6 +311,7 @@ void net_frame(void) {
         }
         pkt[0] = (uint8_t)(SYNC_PORT >> 8); pkt[1] = (uint8_t)SYNC_PORT; pkt[2] = pkt[0]; pkt[3] = pkt[1];
         pkt[4] = 'S'; pkt[5] = 'Y'; pkt[6] = (uint8_t)me; pkt[7] = (uint8_t)cnt;
+        uint32_t ms = (uint32_t)(now * 1000.0); memcpy(pkt + 8, &ms, 4);     /* our clock: the receiver sees how long this one took (extra_delay) */
         if (cnt) transport_send(BCAST, pkt, o);
     }
     pthread_mutex_lock(&sync_mu);
@@ -267,26 +321,222 @@ void net_frame(void) {
         if (now - remote[k].t > 0.25) continue;
         uint32_t c = car_ptr(k); if (!c) continue;
         float s[CAR_BYTES / 4]; memcpy(s, remote[k].st, CAR_BYTES);
-        if (am_host) {                        /* it left the client half a round trip ago */
-            float dt = (float)(rtt_s * 0.5 + (now - remote[k].t));
-            for (int j = 0; j < 3; j++) s[j] += s[3 + j] * dt;
-        }
-        /* a small position error is taken out over a few updates (a visible snap otherwise), a
-         * big one (a crash, a reset to the track) at once; the rest of the state is set as is */
+        /* it is as old as its trip here: move it ahead by that (the host always did, with the
+         * round trip to its quickest client; a client's own car runs on its newest controls) */
+        float lat = remote[k].lat;
+        if (lat < 0 && am_host) lat = (float)(rtt_s * 0.5);
+        float dt = (lat > 0 ? lat * ahead : 0) + (float)(now - remote[k].t);
+        if (dt > 0.5f) dt = 0.5f;
+        for (int j = 0; j < 3; j++) s[j] += s[3 + j] * dt;
+        /* the position error is taken out over a few updates (a visible jump otherwise): a
+         * small one by half each time; a bigger one (its player's game froze for a moment and
+         * it is somewhere else now) at most 1.5 m an update, so it slides into place over a
+         * few tenths of a second; a huge one (a reset to the track far away) at once. The rest
+         * of the state (speed, heading, spin) is set as is. */
         float cur[3]; memcpy(cur, G + c + CAR_STATE, 12);
-        float ex = s[0] - cur[0], ey = s[1] - cur[1], ez = s[2] - cur[2];
-        if (ex * ex + ey * ey + ez * ez < 16.0f) { s[0] = cur[0] + ex * 0.5f; s[1] = cur[1] + ey * 0.5f; s[2] = cur[2] + ez * 0.5f; }
+        float ex = s[0] - cur[0], ey = s[1] - cur[1], ez = s[2] - cur[2], e = sqrtf(ex * ex + ey * ey + ez * ez);
+        float f = e < 4.0f ? 0.5f : e < 40.0f ? fminf(0.5f, 1.5f / e) : 1.0f;
+        if (old_rule) f = e < 4.0f ? 0.5f : 1.0f;                    /* RT_SYNC_SNAP (testing): the old rule */
+        s[0] = cur[0] + ex * f; s[1] = cur[1] + ey * f; s[2] = cur[2] + ez * f;
         memcpy(G + c + CAR_STATE, s, CAR_BYTES);
     }
     pthread_mutex_unlock(&sync_mu);
 }
 
-static void deliver_now(const uint8_t src[6], const uint8_t *p, int len) {
+/* ------------------------------------------------------------- steady beat
+ * The game runs in lockstep: a client advances its whole simulation, and so its
+ * picture, only when the next bundle from the host arrives, about every 31 ms,
+ * in order (the host's packets are one numbered stream, bundles and the rare
+ * reliable messages alike, acknowledged by the client's own packets and resent
+ * when an ack stays behind). So every late or lost bundle (network jitter, a
+ * relayed hop, a hiccup on the host) freezes the client's game for as long as
+ * it takes. Real races show the longest gap between packets in a 2 s window at
+ * 50 ms typically and over 150 ms in a tenth of the windows: the stutter
+ * players report.
+ *
+ * The pacer takes the host's stream in and hands it to the game at a steady beat
+ * a little behind the arrivals (a jitter buffer that grows when bundles come
+ * late and shrinks again). When a bundle is late it hands the game a stand-in
+ * made from the last one (the others' controls as last known), so the game keeps
+ * its beat; the real one, once it comes, is dropped as old. The game's cars are
+ * put right by the state updates (above) anyway, and this player's own car runs
+ * on its newest controls (sync_in), so the cost is only that the others' inputs
+ * reach this game a few tens of milliseconds later. Only when the host stays
+ * silent longer than pace_standin does the game wait, as it always did.
+ *
+ * It runs on the clients only (the host's stream is the one with bundles), on that
+ * stream only: another player's own numbered messages pass untouched.
+ *
+ * Numbering: the game sees our own sequence (pq_v), one per packet handed on,
+ * stand-ins included, so a stand-in never collides with a real message that
+ * takes the host's next number; the host's reliable messages pass at once with
+ * the next of our numbers. The game's acks name our numbers, so on the way out
+ * they are translated back (pq_vmap) to the newest of the host's numbers the game
+ * really had, which is what the host's resend logic wants to know.
+ * RT_PACE=buffer_ms[:standin_ms] (default 40:250, 0 = off). */
+#define PQ 128                            /* the numbers run 0..127 */
+#define SEQ(x) ((uint8_t)((x) & 0x7f))
+static struct { int have; double arrived; uint8_t src[6]; uint8_t p[64]; int len; } pq[PQ];
+static uint8_t pq_seen[16];               /* the host's numbers taken in lately */
+static uint8_t pq_unacked[16];            /* ...and not yet named in an ack to the host (it resends a number
+                                           * until it is named, so every one we got is named once) */
+static uint8_t pq_ack_cur;                /* where to look for the next one to name */
+static pthread_mutex_t pq_mu = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t pq_cv = PTHREAD_COND_INITIALIZER;
+static int pace_on = -1; static double pace_buf = 0.040, pace_standin = 0.250;
+#define PACE_BUF_MAX 0.160
+static volatile int pq_on;                /* a stream is on */
+static uint8_t pq_src[6];                 /* whose: the host's node (the one that sends bundles) */
+static uint8_t pq_rrel;                   /* the host's next bundle to hand on */
+static uint8_t pq_v;                      /* our number the game expects next */
+static uint8_t pq_vmap[PQ];               /* our number -> the newest of the host's the game had by then */
+static uint8_t pq_rlast;                  /* the newest of the host's numbers handed on */
+static uint8_t pq_last_ack;               /* the newest ack of ours the host sent (a stand-in carries it: a stale one would hold the game's own sending back) */
+static double pq_t, pq_tick = 1.0 / 32;   /* the next beat; the host's beat, measured */
+static double pq_rate_t; static uint8_t pq_rate_seq; static int pq_rate_on;   /* the measurement: time and number at its start */
+static double pq_buf, pq_arrival, pq_head, pq_late_t;   /* the buffer wanted now; last arrival; EWMA of what a real bundle waited; last late bundle */
+static double pq_last_real; static uint8_t pq_last[64], pq_last_src[6]; static int pq_last_len;
+static int pq_stalled; static double pq_stall_t;
+static struct { unsigned real, standin, late, dup, msgs, stalls; double stall_s; } pstat;
+static void queue_pkt(const uint8_t src[6], const uint8_t *p, int len, const char *dir);
+static int seen(uint8_t r) { return (pq_seen[r >> 3] >> (r & 7)) & 1; }
+static void set_seen(uint8_t r) { pq_seen[r >> 3] |= (uint8_t)(1 << (r & 7)); }
+static void clr_seen(uint8_t r) { pq_seen[r >> 3] &= (uint8_t)~(1 << (r & 7)); }
+static int unacked(uint8_t r) { return (pq_unacked[r >> 3] >> (r & 7)) & 1; }
+static void set_unacked(uint8_t r) { pq_unacked[r >> 3] |= (uint8_t)(1 << (r & 7)); }
+static void clr_unacked(uint8_t r) { pq_unacked[r >> 3] &= (uint8_t)~(1 << (r & 7)); }
+static int is_bundle(const uint8_t *p, int len) { return len == 47 && p[14] == 0x06; }
+static void pace_reset(void) { memset(pq, 0, sizeof pq); memset(pq_seen, 0, sizeof pq_seen); memset(pq_unacked, 0, sizeof pq_unacked); pq_on = 0; pq_last_len = 0; pq_head = 0; pq_stalled = 0; pq_rate_on = 0; }
+static void pace_start(uint8_t r, double now) {
+    pace_reset(); pq_on = 1; pq_rrel = r; pq_v = r; pq_rlast = SEQ(r - 1); pq_ack_cur = r; pq_t = now + pace_buf; pq_buf = pace_buf; pq_late_t = 0;
+    for (int i = 0; i < PQ; i++) pq_vmap[i] = (uint8_t)i;
+}
+/* our number onto a packet for the game, and what its ack will mean */
+static void renumber(uint8_t *out, int len) {
+    out[10] = pq_v; pq_vmap[pq_v] = pq_rlast; pq_v = SEQ(pq_v + 1);
+    out[12] = out[13] = 0;
+    uint16_t c = game_crc(out + 8, len - 8); out[12] = (uint8_t)(c >> 8); out[13] = (uint8_t)c;
+}
+static void wait_until(double t) {         /* on pq_cv, until the monotonic time t or a signal */
+    struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts);
+    double w = t - tnow(); if (w <= 0) return;
+    ts.tv_sec += (time_t)w; ts.tv_nsec += (long)((w - (double)(time_t)w) * 1e9);
+    if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+    pthread_cond_timedwait(&pq_cv, &pq_mu, &ts);
+}
+static void *pace_main(void *unused) {
+    (void)unused;
+    pthread_mutex_lock(&pq_mu);
+    for (;;) {
+        if (!pq_on) { pthread_cond_wait(&pq_cv, &pq_mu); continue; }
+        double now = tnow();
+        if (pq_t - now > 0.0003) { wait_until(pq_t); continue; }
+        uint8_t out[64], src[6]; int len, real;
+        if (pq[pq_rrel].have) {
+            real = 1; len = pq[pq_rrel].len; memcpy(out, pq[pq_rrel].p, (size_t)len); memcpy(src, pq[pq_rrel].src, 6); pq[pq_rrel].have = 0;
+            pq_head += (now - pq[pq_rrel].arrived - pq_head) * 0.1;
+            memcpy(pq_last, out, (size_t)len); pq_last_len = len; memcpy(pq_last_src, src, 6); pq_last_real = now;
+            pq_rlast = pq_rrel; pstat.real++;
+        } else if (pq_last_len && now - pq_last_real < pace_standin) {
+            real = 0; len = pq_last_len; memcpy(out, pq_last, (size_t)len); memcpy(src, pq_last_src, 6);
+            out[11] = pq_last_ack; pstat.standin++;
+        } else {                               /* nothing to give: the game waits, as it always did */
+            if (!pq_stalled) { pq_stalled = 1; pq_stall_t = now; pstat.stalls++; }
+            pthread_cond_wait(&pq_cv, &pq_mu);
+            if (!pq_on) continue;
+            /* go on from the first bundle that came after the stall began (the one we waited for may never come) */
+            for (int k = 0; k < 32; k++) if (pq[SEQ(pq_rrel + k)].have && pq[SEQ(pq_rrel + k)].arrived >= pq_stall_t) { pq_rrel = SEQ(pq_rrel + k); pq_t = tnow(); break; }
+            continue;
+        }
+        if (pq_stalled) { pq_stalled = 0; pstat.stall_s += now - pq_stall_t; }
+        renumber(out, len);
+        pq_rrel = SEQ(pq_rrel + 1); clr_seen(SEQ(pq_rrel + 64));
+        /* the next beat: the host's, nudged to keep about pq_buf in hand; the buffer eases off
+         * again when no bundle has come late for a while */
+        if (now - pq_late_t > 2.0 && pq_buf > pace_buf) pq_buf -= 0.0005;
+        double err = real ? pq_buf - pq_head : 0;                           /* in hand too little: beat slower, too much: faster */
+        double skew = 1.0 + (err > 0.08 ? 0.08 : err < -0.08 ? -0.08 : err);
+        pq_t += pq_tick * skew;
+        if (pq_t < now - 0.05) pq_t = now;     /* we overslept: no burst to make up for it */
+        pthread_mutex_unlock(&pq_mu);
+        sync_in(out + 4, len - 4);
+        queue_pkt(src, out, len, real ? "in " : "in*");
+        pthread_mutex_lock(&pq_mu);
+    }
+    return NULL;
+}
+/* a packet in: 1 when the pacer took it (one of the host's numbered packets) */
+static int pace_take(const uint8_t src[6], const uint8_t *p, int len) {
+    if (pace_on < 0) {
+        const char *e = getenv("RT_PACE"); pace_on = 1;
+        if (e) { double b = atof(e); const char *c = strchr(e, ':'); if (b <= 0) pace_on = 0; else { pace_buf = b / 1000; if (c) pace_standin = atof(c + 1) / 1000; } }
+        if (pace_on) rt_log("net: steady beat on, %.0f ms in hand, stand-ins for up to %.0f ms", pace_buf * 1000, pace_standin * 1000);
+    }
+    if (!pace_on || !sync_enabled() || len > MAXPKT + 4 || !is_dat(p + 4, len - 4) || p[9] == 0 || !memcmp(src, self_node, 6)) return 0;
+    /* only the host's stream, from its first bundle on (so never on the host itself, and never
+     * another player's own numbered messages) */
+    if (pq_on && tnow() - pq_arrival <= 2.0) { if (memcmp(src, pq_src, 6)) return 0; }
+    else if (!is_bundle(p, len)) return 0;
+    uint8_t r = SEQ(p[10]); double now = tnow();
+    pthread_mutex_lock(&pq_mu);
+    static int started; if (!started) { started = 1; pthread_t t; pthread_create(&t, NULL, pace_main, NULL); }
+    if (!pq_on || now - pq_arrival > 2.0) { pace_start(r, now); memcpy(pq_src, src, 6); }   /* a new stream */
+    trace_pkt("in>", src, (uint16_t)(p[0] << 8 | p[1]), (uint16_t)(p[2] << 8 | p[3]), p + 4, len - 4);
+    pq_arrival = now;
+    if (seen(r)) { pstat.dup++; pthread_mutex_unlock(&pq_mu); return 1; }  /* resent: we had it (or a stand-in did) */
+    set_seen(r); set_unacked(r);
+    if (((p[11] - pq_last_ack) & 0x7f) < 64 || !pstat.real) pq_last_ack = SEQ(p[11]);
+    if (!is_bundle(p, len)) {                                                /* a reliable message: on it goes, with our next number */
+        uint8_t out[MAXPKT + 4]; memcpy(out, p, (size_t)len);
+        if (((r - pq_rlast) & 0x7f) < 64) pq_rlast = r;
+        renumber(out, len); pstat.msgs++;
+        pthread_mutex_unlock(&pq_mu);
+        sync_in(out + 4, len - 4);
+        queue_pkt(src, out, len, "in ");
+        return 1;
+    }
+    int d = (r - pq_rrel) & 0x7f; if (d >= 64) d -= 128;
+    if (d < 0) {                                                             /* late: a stand-in went in its place; keep more in hand */
+        pstat.late++; pq_late_t = now; if (pq_buf < PACE_BUF_MAX) pq_buf += 0.010;
+        pthread_mutex_unlock(&pq_mu); return 1;
+    }
+    if (d > 32) { pace_start(r, now); memcpy(pq_src, src, 6); }           /* the stream jumped: start again */
+    else {                                                                   /* the host's beat: 32 numbers' worth of arrivals at a time (jitter averages out) */
+        if (!pq_rate_on) { pq_rate_on = 1; pq_rate_t = now; pq_rate_seq = r; }
+        int n = (r - pq_rate_seq) & 0x7f;
+        if (n >= 32 && n < 64) {
+            double tick = (now - pq_rate_t) / n;
+            if (tick > 0.025 && tick < 0.040) pq_tick += (tick - pq_tick) * 0.5;
+            pq_rate_t = now; pq_rate_seq = r;
+        }
+    }
+    pq[r].have = 1; pq[r].arrived = now; pq[r].len = len; memcpy(pq[r].p, p, (size_t)len); memcpy(pq[r].src, src, 6);
+    pthread_cond_signal(&pq_cv);
+    pthread_mutex_unlock(&pq_mu);
+    return 1;
+}
+/* a packet out to the host: the game's ack names our number; the host wants its own */
+static void pace_out(const uint8_t *dst, uint8_t *d, int n) {
+    if (!pq_on || memcmp(dst, pq_src, 6) || !is_dat(d, n)) return;
+    uint8_t ack = pq_vmap[SEQ(d[7])];                /* what the game means, in the host's numbers */
+    pthread_mutex_lock(&pq_mu);
+    for (int k = 0; k < PQ; k++) {                   /* but first every number we got and never named */
+        uint8_t r = SEQ(pq_ack_cur + k);
+        if (unacked(r)) { ack = r; clr_unacked(r); pq_ack_cur = SEQ(r + 1); break; }
+    }
+    pthread_mutex_unlock(&pq_mu);
+    d[7] = ack; d[8] = d[9] = 0;
+    uint16_t c = game_crc(d + 4, n - 4); d[8] = (uint8_t)(c >> 8); d[9] = (uint8_t)c;
+}
+static void pace_log(void) {               /* at the end of a race */
+    if (!pstat.real && !pstat.standin) return;
+    rt_log("net: steady beat: %u bundles, %u stand-ins, %u late, %u resent, %u messages, %u stalls (%.1f s), buffer now %.0f ms",
+           pstat.real, pstat.standin, pstat.late, pstat.dup, pstat.msgs, pstat.stalls, pstat.stall_s, pq_buf * 1000);
+    pthread_mutex_lock(&pq_mu); memset(&pstat, 0, sizeof pstat); pace_reset(); pthread_mutex_unlock(&pq_mu);
+}
+
+static void queue_pkt(const uint8_t src[6], const uint8_t *p, int len, const char *dir) {
     uint16_t dport = (uint16_t)(p[0] << 8 | p[1]), sport = (uint16_t)(p[2] << 8 | p[3]);
-    if (dport == SYNC_PORT) { sync_state_in(p + 4, len - 4); return; }
-    uint8_t buf[MAXPKT + 4];
-    if (len <= (int)sizeof buf) { memcpy(buf, p, (size_t)len); sync_in(buf + 4, len - 4); p = buf; }
-    trace_pkt("in ", src, dport, sport, p + 4, len - 4);
+    trace_pkt(dir, src, dport, sport, p + 4, len - 4);
     pthread_mutex_lock(&mu);
     stats.rx++; stats.rxb += (uint64_t)len;
     for (int i = 0; i < NSOCK; i++) {
@@ -301,6 +551,16 @@ static void deliver_now(const uint8_t src[6], const uint8_t *p, int len) {
         break;
     }
     pthread_mutex_unlock(&mu);
+}
+static void deliver_now(const uint8_t src[6], const uint8_t *p, int len) {
+    uint16_t dport = (uint16_t)(p[0] << 8 | p[1]);
+    if (dport == SYNC_PORT) { sync_state_in(src, p + 4, len - 4); return; }
+    uint8_t buf[MAXPKT + 4];
+    if (len > (int)sizeof buf) { queue_pkt(src, p, len, "in "); return; }
+    memcpy(buf, p, (size_t)len);
+    if (pace_take(src, buf, len)) return;             /* a bundle: the pacer hands it on at its beat */
+    sync_in(buf + 4, len - 4);
+    queue_pkt(src, buf, len, "in ");
 }
 
 #ifdef __EMSCRIPTEN__
@@ -359,6 +619,13 @@ static void transport_send(const uint8_t dst[6], const uint8_t *pkt, int len) {
 }
 EMSCRIPTEN_KEEPALIVE void rt_net_packet(const uint8_t *buf, int len) {   /* [src 6][packet] */
     if (len > 6) net_deliver(buf, buf + 6, len - 6);
+}
+/* the page: its round trip to a peer (direct link, or through the relay), every 2 s */
+EMSCRIPTEN_KEEPALIVE void rt_net_peer_rtt(const char *n, int ms) {
+    if (!n || strlen(n) != 12) return;
+    uint8_t node[6];
+    for (int i = 0; i < 6; i++) { unsigned v; sscanf(n + 2 * i, "%2x", &v); node[i] = (uint8_t)v; }
+    set_peer_rtt(node, ms / 1000.0);
 }
 /* the page calls this after joining a room (before the game opens a socket) */
 EMSCRIPTEN_KEEPALIVE void rt_net_set_node(const char *n) {
@@ -549,6 +816,7 @@ static uint32_t ws_sendto(CPU *c, const uint32_t *a) {
     stats.tx++; stats.txb += len;
     trace_pkt("out", node, dport, s->port, G + A(1), (int)len);
     sync_out(G + A(1), (int)len);
+    pace_out(node, pkt + 4, (int)len);
     if (!memcmp(node, self_node, 6)) net_deliver(self_node, pkt, (int)len + 4);   /* to ourselves */
     else transport_send(node, pkt, (int)len + 4);
     if (rt_verbose > 1) rt_log("sendto(%#x, %u bytes -> %02x..%02x:%04x)", A(0), len, node[0], node[5], dport);

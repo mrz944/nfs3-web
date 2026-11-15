@@ -2,6 +2,16 @@
   "game": "NFS III",
   "about": "What changed on nfs3.xyz, day by day. Kinds: new, improved, fixed. Days run 05:00 to 05:00 Polish time. tools/discord/changelog.mjs posts them to Discord.",
   "days": [
+    { "date": "2026-11-15", "items": [
+      ["improved", "Online: the race no longer freezes for a moment when an update from the host arrives late. The game keeps a steady pace through it, which removes most of the stutter on slow or busy connections."],
+      ["improved", "Online: players whose routers block a direct connection now link through relay servers close to them, instead of through this site's server, for a lower ping. The room shows them as via TURN."],
+      ["improved", "Online: an update about another player's car that was held up on the way now moves that car the right distance ahead."]
+    ] },
+    { "date": "2026-11-13", "items": [
+      ["improved", "Online: when a player's computer stutters, their car no longer jumps around on everyone else's screen; it slides back into place."],
+      ["improved", "Online: other players' cars are shown where they are now, not where they were when the update left. This matters most on phones and slow connections."],
+      ["fixed", "Online: a dropped connection to the server reconnects within a second without leaving the room. Before, if it was the host's connection, everyone's race froze."]
+    ] },
     { "date": "2026-11-12", "items": [
       ["new", "Discord server for help, bug reports, ideas and finding races: Join our Discord in the menu."],
       ["new", "What's New: this list of changes, day by day."]

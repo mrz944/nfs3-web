@@ -238,6 +238,8 @@ bugs much easier to chase than in a browser.
 | `RT_NET=unix:PATH RT_ROOM=… RT_NAME=…` | join an online room natively |
 | `RT_NET_TRACE` · `RT_NET_STATS` · `RT_NET_LOSS=%` · `RT_NET_DELAY=ms` | packet trace, per-second stats, simulated loss and latency |
 | `RT_NETSYNC=0` · `RT_CARLOG=ms` | online without the smoother play · log the cars' positions |
+| `RT_NET_STALL=every:ms` · `RT_SYNC_AHEAD=x` · `RT_SYNC_SNAP=1` | freeze the game now and then (a slow computer) · move others' cars ahead by x times their delay (default 1) · the old jump-into-place rule |
+| `RT_NET_JITTER=ms` · `RT_PACE=buffer_ms[:standin_ms]` | up to that much extra random delay on incoming packets · the client's steady beat: bundles in hand before the game gets them, and how long stand-ins cover a silent host (default 40:250, 0 = off) |
 | `RT_MEMDUMP=s:n:frames` | guest memory snapshots to `build/mem/` |
 | `tools/audiosim.sh`, then `RT_WAV=f RT_SIM_DRIFT=x build/nfs3sim` | the browser's audio path natively, recorded to a WAV (sound card off by x, e.g. -0.0003); `RT_RESYNC_LOG` logs mixer jumps |
 
