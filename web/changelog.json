@@ -3,6 +3,8 @@
   "about": "What changed on nfs3.xyz, day by day. Kinds: new, improved, fixed. Days run 05:00 to 05:00 Polish time. tools/discord/changelog.mjs posts them to Discord.",
   "days": [
     { "date": "2026-11-15", "items": [
+      ["new", "Phones: steer with a thumb stick or by tilting the phone like a wheel, gently or hard, as with a gamepad. The round button at the top right switches between buttons, stick and tilt during the game."],
+      ["new", "Phones: touch buttons for camera, look behind, reset and horn, and optional gear buttons for a manual gearbox. Game Settings set the steering, the size of the controls and which thumb steers."],
       ["improved", "Online: the race no longer freezes for a moment when an update from the host arrives late. The game keeps a steady pace through it, which removes most of the stutter on slow or busy connections."],
       ["improved", "Online: players whose routers block a direct connection now link through relay servers close to them, instead of through this site's server, for a lower ping. The room shows them as via TURN."],
       ["improved", "Online: an update about another player's car that was held up on the way now moves that car the right distance ahead."]
