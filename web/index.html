@@ -58,7 +58,7 @@
   [hidden] { display: none !important; }
   html, body { margin: 0; min-height: 100%; background: var(--night); color: var(--text); font: 13px/1.55 var(--ui); }
   /* the pixel font stays crisp: no smoothing on anything set in it */
-  .mbtn, button, label.btn, .panel > .ph h2, .tip b, .maker b, .specs dt, h3.minor, .bar h3, .pill, #online label, #rooms th, .opt b, .opt output, .tag, .ticker, footer,
+  .mbtn, button, label.btn, .panel > .ph h2, .tip b, .maker b, .more b, .more a span, .specs dt, h3.minor, .bar h3, .pill, #online label, #rooms th, .opt b, .opt output, .tag, .ticker, footer,
   .badge, .counter i, #fps, #hint, #netbadge, #loading, #loadbadge, .steps li::before, #top-list .r { -webkit-font-smoothing: none; -moz-osx-font-smoothing: unset; font-smooth: never; }
   a { color: var(--sky); }
   ::selection { background: var(--gold); color: var(--ink); }
@@ -107,10 +107,18 @@
   .discord b { display: block; font: 400 16px/1.15 var(--px); color: #fff; text-transform: uppercase; text-shadow: 2px 2px 0 #2c3390; margin-bottom: 2px; }
   .discord:hover, .discord:focus-visible { outline: none; background: linear-gradient(180deg, #a3aaff 0 2px, #6a76ff 2px 55%, #5865f2); }
   .discord:hover b, .discord:focus-visible b { color: var(--gold); }
-  .menu .hint { color: var(--muted); font-size: 11px; padding: 0 4px; }
+  .menu .hint { color: var(--muted); font-size: 11px; padding: 0 4px; } .menu .hint:empty { display: none; } .menu .forget { margin-top: 8px; }
   .tip, .maker { margin-top: 8px; padding: 8px 10px; font-size: 11px; color: #d0daff; clip-path: var(--notch);
     background: linear-gradient(180deg, #0a1a6a, #040e48); box-shadow: inset 0 2px 0 var(--gold), inset 2px 0 0 #1e3494, inset -2px -2px 0 var(--lo); }
   .tip b, .maker b { display: block; font: 700 16px/1.2 var(--px); color: var(--gold); text-transform: uppercase; text-shadow: 2px 2px 0 var(--rust); margin-bottom: 2px; }
+  /* the sister sites under the menu: one card each, like the menu's buttons */
+  .more { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .more b { display: block; padding-left: 2px; font: 700 16px/1.2 var(--px); color: var(--gold); text-transform: uppercase; text-shadow: 2px 2px 0 var(--rust); }
+  .more a { display: block; padding: 8px 12px; clip-path: var(--notch); font-size: 11px; line-height: 1.35; color: #c8d4ff; text-decoration: none;
+    background: linear-gradient(180deg, #0a1a6a, #040e48); box-shadow: inset 2px 0 0 #1e3494, inset 0 -2px 0 var(--lo); transition: box-shadow .15s, transform .15s ease-out, color .15s; }
+  .more a span { display: block; font: 700 16px/1.2 var(--px); color: #fff; text-transform: uppercase; }
+  .more a:hover, .more a:focus-visible { color: #fff; transform: translateX(4px); box-shadow: inset 6px 0 0 var(--gold), inset 0 -2px 0 var(--lo); outline: none; }
+  .more a:hover span, .more a:focus-visible span { color: var(--gold); }
   .maker a { color: #fff; text-decoration: none; } .maker a:hover { color: var(--gold); text-decoration: underline; }
 
   /* small buttons inside panels */
@@ -361,7 +369,7 @@
   .lbar i { display: block; width: 64px; height: 100%; background: repeating-linear-gradient(90deg, var(--gold) 0 6px, var(--amber) 6px 8px); animation: lmove 1.2s steps(14) infinite; }
   @keyframes lmove { from { transform: translateX(-64px); } to { transform: translateX(224px); } }
   #loadbadge { position: fixed; right: calc(12px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 20; font: 700 16px/1 var(--px); color: var(--ink); background: var(--gold); padding: 4px 10px; text-transform: uppercase; clip-path: var(--notch); }
-  @media (prefers-reduced-motion: reduce) { .lbar i, .live.on::before, #daily .live, .ticker span, .mbtn.go:hover { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .more a { transition: none; } .more a:hover { transform: none; } .lbar i, .live.on::before, #daily .live, .ticker span, .mbtn.go:hover { animation: none !important; } }
   /* What's New (setupChangelog in main.js): a dialog over the page */
   #changelog { --cl: var(--gold); padding: 0; border: 0; background: transparent; color: var(--text); width: min(680px, calc(100vw - 32px)); max-width: none; max-height: none; overflow: visible; }
   #changelog::backdrop { background: rgba(0, 2, 12, .74); }
@@ -402,17 +410,17 @@
       <a class="mbtn" href="#about">Read Me…</a>
       <a class="mbtn" id="changelog-open" href="#changelog">What's New… <i class="clnew">new</i></a>
       <div class="sep"></div>
-      <a class="discord" href="https://discord.gg/sAjTGE7gkw" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg><span><b>Join our Discord</b>Help, bug reports, ideas, races</span></a>
-      <button id="forget" class="mbtn dim" hidden>Remove Game Files</button>
-      <div class="hint">Game files download automatically and are cached in this browser.</div>
       <div class="hint" id="pad"></div>
+      <a class="discord" href="https://discord.gg/sAjTGE7gkw" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg><span><b>Join our Discord</b>Help, bug reports, ideas, races</span></a>
+      <div class="more"><b>More races</b>
+        <a href="https://nfs2se.xyz/" target="_blank" rel="noopener"><span>nfs2se.xyz ›</span>Need for Speed II: Special Edition</a>
+        <a href="https://nfs4.xyz/" target="_blank" rel="noopener"><span>nfs4.xyz ›</span>Need for Speed: High Stakes</a></div>
       <div class="tip"><b>Tip of the day</b><span id="tip">Hold the handbrake through tight corners to slide around them.</span></div>
       <div class="maker"><b>Created by</b>
         <a href="https://github.com/mrz944" target="_blank" rel="noopener">Marcin Zadka</a><br>
         Source on <a href="https://github.com/mrz944/nfs3-web" target="_blank" rel="noopener">GitHub ›</a></div>
-      <div class="maker more"><b>More races</b>
-        <a href="https://nfs2se.xyz/" target="_blank" rel="noopener">nfs2se.xyz ›</a> Need for Speed II: Special Edition<br>
-        <a href="https://nfs4.xyz/" target="_blank" rel="noopener">nfs4.xyz ›</a> Need for Speed: High Stakes</div>
+      <button id="forget" class="mbtn dim forget" hidden>Remove Game Files</button>
+      <div class="hint">Game files download automatically and are cached in this browser.</div>
     </nav>
 
     <div class="panels" id="setup">
