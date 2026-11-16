@@ -144,7 +144,11 @@ void net_deliver(const uint8_t src[6], const uint8_t *p, int len) {
  * k in block k). CRC: reflected, table at 0x566b54 (poly 0xA001), init 0xFBEA, over
  * the bytes from fe on with the CRC bytes zero. Cars: 8 pointers at 0x5efac8, car k
  * = player k, then the AI; physics state at +0x98 (88 bytes). Our state packets (socket
- * 0x7ea5): 'S' 'Y', sender's car, count, sender's clock (u32 ms), then count x (car, 88 bytes). */
+ * 0x7ea5): 'S' 'Y', sender's car, count, sender's clock (u32 ms), the race's host (its node,
+ * 6 bytes), then count x (car, 88 bytes). They go to the whole room, and a room can hold
+ * two races at once (two hosts, each with its own players: the game keeps their packets
+ * apart): states from another race than ours are ignored, or its cars would be pulled to
+ * places on another track. */
 #define CAR_TABLE 0x5efac8u
 #define CAR_STATE 0x98u
 #define CAR_BYTES 88
@@ -159,6 +163,7 @@ static double rtt_s = 0.1;               /* host: round trip to the clients (min
 static double bundle_t[256];
 static struct { int have; double t; float lat; uint8_t st[CAR_BYTES]; } remote[8];
 static double human_seen[8];             /* host: a client's state for this car arrived (it owns it) */
+static uint8_t race_host[6]; static int race_host_known;   /* client: whose bundles we get */
 static pthread_mutex_t sync_mu = PTHREAD_MUTEX_INITIALIZER;
 /* each peer's one-way delay to us in seconds (half its round trip, from the page); natively the
  * simulated RT_NET_DELAY; -1 when not known */
@@ -221,7 +226,7 @@ static void sync_out(const uint8_t *d, int n) {
     }
 }
 /* a game packet coming in (network thread): may rewrite a bundle in place */
-static void sync_in(uint8_t *d, int n) {
+static void sync_in(const uint8_t src[6], uint8_t *d, int n) {
     if (!sync_enabled() || !is_dat(d, n)) return;
     pthread_mutex_lock(&sync_mu);
     double now = tnow();
@@ -231,6 +236,7 @@ static void sync_in(uint8_t *d, int n) {
         if (t > 0 && now - t < 1.0) { double r = now - t; rtt_s = r < rtt_s ? r : rtt_s + (r - rtt_s) * 0.02; }
     } else if (n == 43 && d[10] == 0x06) {   /* a bundle */
         am_client = 1; last_race_pkt = now;
+        memcpy(race_host, src, 6); race_host_known = 1;
         /* learn my block: the one holding what I sent with the acked seq */
         const uint8_t *sent = sent_ctl[d[7]];
         if (my_slot < 0 && sent_t[d[7]] > 0 && (sent[0] | sent[1] | sent[2] | sent[3])) {
@@ -255,13 +261,16 @@ static void sync_in(uint8_t *d, int n) {
 static void sync_state_in(const uint8_t src[6], const uint8_t *d, int n) {
     if (!sync_enabled() || n < 4 || d[0] != 'S' || d[1] != 'Y') return;
     int from = d[2], cnt = d[3];
-    if (n < 8 + cnt * (1 + CAR_BYTES)) return;
+    if (n < 14 + cnt * (1 + CAR_BYTES)) return;
     uint32_t sent_ms; memcpy(&sent_ms, d + 4, 4);
     pthread_mutex_lock(&sync_mu);
+    /* only our race's: its host is us, or the one whose bundles we get */
+    const uint8_t *ours = am_host ? self_node : race_host_known ? race_host : NULL;
+    if (!ours || memcmp(d + 8, ours, 6)) { pthread_mutex_unlock(&sync_mu); return; }
     double now = tnow();
     float extra = extra_delay(src, sent_ms, now);
     for (int i = 0; i < cnt; i++) {
-        const uint8_t *e = d + 8 + i * (1 + CAR_BYTES); int k = e[0];
+        const uint8_t *e = d + 14 + i * (1 + CAR_BYTES); int k = e[0];
         if (k > 7 || k == (am_host ? 0 : my_slot)) continue;        /* never overwrite my own car */
         remote[k].have = 1; remote[k].t = now; memcpy(remote[k].st, e + 1, CAR_BYTES);
         float lat = lat_of(src); remote[k].lat = lat < 0 ? lat : lat + extra;
@@ -282,7 +291,7 @@ void net_frame(void) {
     if (now - last_race_pkt > 0.5) {
         if (now - last_race_pkt > 5.0 && (am_host || am_client)) {   /* race over: learn again next time */
             pthread_mutex_lock(&sync_mu);
-            my_slot = -1; am_host = am_client = 0; memset(human_seen, 0, sizeof human_seen); memset(sent_t, 0, sizeof sent_t);
+            my_slot = -1; am_host = am_client = 0; race_host_known = 0; memset(human_seen, 0, sizeof human_seen); memset(sent_t, 0, sizeof sent_t);
             pthread_mutex_unlock(&sync_mu);
             pace_log();
         }
@@ -302,7 +311,7 @@ void net_frame(void) {
     static double last_send;
     if (now - last_send >= 0.030) {
         last_send = now;
-        uint8_t pkt[4 + 8 + 8 * (1 + CAR_BYTES)]; int cnt = 0, o = 12;
+        uint8_t pkt[4 + 14 + 8 * (1 + CAR_BYTES)]; int cnt = 0, o = 18;
         for (int k = 0; k < 8; k++) {
             uint32_t c = car_ptr(k); if (!c) continue;
             int mine = k == me || (am_host && k != 0 && now - human_seen[k] > 2.0);
@@ -312,7 +321,11 @@ void net_frame(void) {
         pkt[0] = (uint8_t)(SYNC_PORT >> 8); pkt[1] = (uint8_t)SYNC_PORT; pkt[2] = pkt[0]; pkt[3] = pkt[1];
         pkt[4] = 'S'; pkt[5] = 'Y'; pkt[6] = (uint8_t)me; pkt[7] = (uint8_t)cnt;
         uint32_t ms = (uint32_t)(now * 1000.0); memcpy(pkt + 8, &ms, 4);     /* our clock: the receiver sees how long this one took (extra_delay) */
-        if (cnt) transport_send(BCAST, pkt, o);
+        pthread_mutex_lock(&sync_mu);
+        int tagged = am_host || race_host_known;
+        memcpy(pkt + 12, am_host ? self_node : race_host, 6);                /* our race: its host */
+        pthread_mutex_unlock(&sync_mu);
+        if (cnt && tagged) transport_send(BCAST, pkt, o);
     }
     pthread_mutex_lock(&sync_mu);
     for (int k = 0; k < 8; k++) {
@@ -458,7 +471,7 @@ static void *pace_main(void *unused) {
         pq_t += pq_tick * skew;
         if (pq_t < now - 0.05) pq_t = now;     /* we overslept: no burst to make up for it */
         pthread_mutex_unlock(&pq_mu);
-        sync_in(out + 4, len - 4);
+        sync_in(src, out + 4, len - 4);
         queue_pkt(src, out, len, real ? "in " : "in*");
         pthread_mutex_lock(&pq_mu);
     }
@@ -490,7 +503,7 @@ static int pace_take(const uint8_t src[6], const uint8_t *p, int len) {
         if (((r - pq_rlast) & 0x7f) < 64) pq_rlast = r;
         renumber(out, len); pstat.msgs++;
         pthread_mutex_unlock(&pq_mu);
-        sync_in(out + 4, len - 4);
+        sync_in(src, out + 4, len - 4);
         queue_pkt(src, out, len, "in ");
         return 1;
     }
@@ -559,7 +572,7 @@ static void deliver_now(const uint8_t src[6], const uint8_t *p, int len) {
     if (len > (int)sizeof buf) { queue_pkt(src, p, len, "in "); return; }
     memcpy(buf, p, (size_t)len);
     if (pace_take(src, buf, len)) return;             /* a bundle: the pacer hands it on at its beat */
-    sync_in(buf + 4, len - 4);
+    sync_in(src, buf + 4, len - 4);
     queue_pkt(src, buf, len, "in ");
 }
 
