@@ -23,6 +23,7 @@ import { createAnalytics } from './analytics.mjs';
 import { createLaps } from './laps.mjs';
 import { createPlayers, foldName } from './players.mjs';
 import { playersSection } from './player-stats.mjs';
+import { createReplays } from './replays.mjs';
 
 const root = resolve(fileURLToPath(new URL('.', import.meta.url)));
 let data = resolve(root, '..', 'build');          // --data DIR (below) moves it
@@ -133,7 +134,7 @@ setInterval(() => {
 // ?v=<build>: index.html and our .js files are rewritten on the way out, and a new build means
 // new addresses. Inside dist/nfs3.js the same goes for "nfs3.js" (its game threads load it
 // again) and "nfs3.wasm". sw.js keeps a fixed address (a service worker is identified by it).
-const SCRIPTS = ['main.js', 'mods.js', 'net.js', 'net-worker.js', 'audio-worklet.js', 'opfs.js', 'opfs-writer.js', 'dist/nfs3.js'];
+const SCRIPTS = ['main.js', 'mods.js', 'net.js', 'net-worker.js', 'audio-worklet.js', 'opfs.js', 'opfs-writer.js', 'replay-watch.js', 'dist/nfs3.js'];
 let verCache = { t: 0, v: '' };
 function version() {
   if (Date.now() - verCache.t < 2000) return verCache.v;
@@ -144,7 +145,7 @@ function version() {
 }
 function versioned(text) {
   const v = version();
-  return text.replace(/(["'])(\.\/)?(main\.js|mods\.js|net\.js|net-worker\.js|audio-worklet\.js|opfs\.js|opfs-writer\.js|dist\/nfs3\.js|nfs3\.js|nfs3\.wasm)\1/g, (m, q, dot, f) => `${q}${dot || ''}${f}?v=${v}${q}`);
+  return text.replace(/(["'])(\.\/)?(main\.js|mods\.js|net\.js|net-worker\.js|audio-worklet\.js|opfs\.js|opfs-writer\.js|replay-watch\.js|dist\/nfs3\.js|nfs3\.js|nfs3\.wasm)\1/g, (m, q, dot, f) => `${q}${dot || ''}${f}?v=${v}${q}`);
 }
 
 // players (players.mjs): a name, its laps and its logs, tied to the page's player key
@@ -159,6 +160,8 @@ setPlayLog(playDir);
 
 // lap records (laps.mjs): POST /__lap from the game page, GET /__laps for the start page
 const laps = createLaps(join(data, 'laps'), players);
+// replays of the races the best laps were driven in (replays.mjs): POST /__replay, GET /__replay/<race>.rp3
+const replays = createReplays(join(data, 'replays'), { players, laps });
 const playersStats = playersSection({ players, laps, playDir, logDir, sessionsDir: join(data, 'players') });
 
 // push notifications (push.mjs) and the daily race
@@ -262,6 +265,8 @@ const server = createServer((req, res) => {
   if (url.pathname === '/__ice') { ice(req, res); return; }
   if (req.method === 'POST' && url.pathname === '/__lap') { laps.handlePost(req, res); return; }
   if (url.pathname === '/__laps') { laps.handleGet(req, res); return; }
+  if (req.method === 'POST' && url.pathname === '/__replay') { replays.handlePost(req, res, url); return; }
+  if (url.pathname.startsWith('/__replay/')) { replays.handleGet(req, res, url); return; }
   if (url.pathname.startsWith('/__push/')) {
     if (req.method === 'POST' && foreignOrigin(req)) { res.writeHead(403).end(); req.resume(); return; }
     push.handle(req, res, url.pathname.slice(1)); return;

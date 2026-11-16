@@ -217,7 +217,8 @@ tools/        lifter (lift.py), PE parser, profiler, test helpers
 runtime/      Win32 / DirectX / Glide / WSOCK runtime (C), GPU renderer
 web/          page (index.html, main.js), lobby + relay (relay.mjs, net.js),
               dev server (serve.mjs), analytics (analytics.mjs), lap records
-              (laps.mjs), players and their passphrases (players.mjs, words.js)
+              (laps.mjs), players and their passphrases (players.mjs, words.js),
+              lap replays (replays.mjs, replay-watch.js)
 docs/         screenshots
 build.sh      lift + native build          build-web.sh   Emscripten build
 gen/ build/ web/dist/ game/               local only, never committed

@@ -11,6 +11,8 @@
 // name: they count for the player who took that name (players.mjs 'legacy'), else they stay
 // one row per (folded) name until someone does. A lap without a key (a page from before keys,
 // still open) is taken only for a name no player has.
+// Replays (replays.mjs): each lap carries its race's id (race, made by the page); when the
+// game's replay of that race comes in, the boards link it on that race's laps (rp, lap, laps).
 // Laps driven with mods on never get here (the page doesn't send them). The page sends them,
 // so a determined cheat can post anything: the checks below only keep out nonsense.
 import { appendFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
@@ -26,10 +28,13 @@ export function createLaps(dir, players) {
   mkdirSync(dir, { recursive: true });
   const laps = [];                    // every lap, oldest first
   const legacy = new Map();           // folded name -> laps from before player keys under it
+  const races = new Map();            // race id -> its laps
+  const api = { hasReplay: () => false };   // replays.mjs: is there a replay of this race?
   let cache = null, cacheFor = '', json = null;
 
   function keep(r) {
     laps.push(r);
+    if (r.race) { if (!races.has(r.race)) races.set(r.race, []); races.get(r.race).push(r); }
     if (!r.p) { const f = foldName(r.n); legacy.set(f, (legacy.get(f) || 0) + 1); }
   }
   for (const f of readdirSync(dir).filter((f) => /^laps-.*\.jsonl$/.test(f)).sort()) {
@@ -67,7 +72,8 @@ export function createLaps(dir, players) {
     if (json) return json;
     const out = {};
     for (const [key, m] of b) out[key] = [...m.values()].sort((x, y) => x.r.ticks - y.r.ticks || x.r.t - y.r.t).slice(0, TOP)
-      .map(({ o, r }) => ({ ...(o.startsWith('n:') ? {} : { p: o }), n: o.startsWith('n:') ? r.n : players.nameOf(o) || r.n, car: r.car, ticks: r.ticks, f: r.f, t: r.t }));
+      .map(({ o, r }) => ({ ...(o.startsWith('n:') ? {} : { p: o }), n: o.startsWith('n:') ? r.n : players.nameOf(o) || r.n, car: r.car, ticks: r.ticks, f: r.f, t: r.t,
+        ...(r.race && api.hasReplay(r.race) ? { rp: r.race, lap: r.lap, laps: r.laps } : {}) }));
     json = JSON.stringify({ boards: out });
     return json;
   }
@@ -96,7 +102,8 @@ export function createLaps(dir, players) {
         p = u.pl.p; n = u.pl.n;
         players.session(u.pl, m.s);
       } else if (players.nameState(n).state === 'taken') { send(409, { error: 'taken' }); return; }
-      const r = { t: Date.now(), n, ...(p ? { p } : {}), track: m.track, f: m.f, car: m.car, ticks: m.ticks, lap: m.lap, laps: m.laps, b: String(m.b || '').slice(0, 24) };
+      const race = typeof m.race === 'string' && /^[a-z0-9]{8,16}$/.test(m.race) ? m.race : null;
+      const r = { t: Date.now(), n, ...(p ? { p } : {}), ...(race ? { race } : {}), track: m.track, f: m.f, car: m.car, ticks: m.ticks, lap: m.lap, laps: m.laps, b: String(m.b || '').slice(0, 24) };
       const o = owner(r), had = o && boards().get(`${r.track}:${r.f & FLAG.backward ? 'b' : 'f'}`)?.get(o);
       try { appendFileSync(join(dir, `laps-${new Date().toISOString().slice(0, 7)}.jsonl`), JSON.stringify(r) + '\n'); } catch (e) { console.log('[laps] write failed:', e.message); }
       keep(r);
@@ -111,5 +118,14 @@ export function createLaps(dir, players) {
   }
   // for the stats page and tools/players.mjs: a player's laps (their own and the old ones they took)
   const lapsOf = (p) => laps.filter((r) => owner(r) === p);
-  return { handlePost, handleGet, lapsOf, owner };
+  // replays.mjs: a race's laps, and the races whose laps are someone's best on a board (their
+  // replays are kept, the others go)
+  const lapsOfRace = (id) => races.get(id) || [];
+  function bestRaces() {
+    const out = new Set();
+    for (const m of boards().values()) for (const { r } of m.values()) if (r.race) out.add(r.race);
+    return out;
+  }
+  const changed = () => { json = null; };
+  return Object.assign(api, { handlePost, handleGet, lapsOf, owner, lapsOfRace, bestRaces, changed });
 }
