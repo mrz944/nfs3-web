@@ -52,6 +52,7 @@ export function createLaps(dir, players) {
     const f = foldName(r.n), lo = players.legacyOwner(f);
     return lo === undefined ? 'n:' + f : lo;
   }
+  const hasRp = (r) => !!r.race && api.hasReplay(r.race);
   // "track:f|b" -> Map(owner -> best lap)
   function boards() {
     const stamp = `${laps.length}:${players.version}`;
@@ -62,7 +63,8 @@ export function createLaps(dir, players) {
       const key = `${r.track}:${r.f & FLAG.backward ? 'b' : 'f'}`;
       if (!b.has(key)) b.set(key, new Map());
       const m = b.get(key), had = m.get(o);
-      if (!had || r.ticks < had.r.ticks) m.set(o, { o, r });
+      // the same time again: the lap with a replay
+      if (!had || r.ticks < had.r.ticks || (r.ticks === had.r.ticks && hasRp(r) && !hasRp(had.r))) m.set(o, { o, r });
     }
     cacheFor = stamp; cache = b; json = null;
     return b;
@@ -128,6 +130,6 @@ export function createLaps(dir, players) {
     for (const m of boards().values()) for (const { r } of m.values()) if (r.race) out.add(r.race);
     return out;
   }
-  const changed = () => { json = null; };
+  const changed = () => { json = null; cache = null; };     // a replay came or went
   return Object.assign(api, { handlePost, handleGet, lapsOf, owner, lapsOfRace, bestRaces, changed });
 }
