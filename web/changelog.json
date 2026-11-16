@@ -7,6 +7,7 @@
       ["new", "Race as yourself on another device: Use on another device, under Your name, shows 8 words. Enter them on your phone or another computer to race there with your name and lap records. No account, no e-mail."],
       ["new", "Lap Records: ▶ replay on a best lap is the game's own replay of the race it was driven in. Click it and it's in your game under Load › Replays, to watch from any camera. Nothing to do for your own: after each race that isn't online, the replay goes with your laps by itself."],
       ["fixed", "Replays, ghosts, knockouts and tournaments you save in the game now show up under Load. Before, the list never found them."],
+      ["fixed", "Lap Records: laps from races longer than the Single Race setting, like the 4-lap knockout rounds, and from some other modes never reached the boards. About one lap in five was lost. They count now, and the ones lost since the start are back on the boards."],
       ["improved", "Online: joining straight from an invite link now waits a moment for the relay servers close to you, so fewer links fall back to this site's server."]
     ] },
     { "date": "2026-11-15", "items": [
