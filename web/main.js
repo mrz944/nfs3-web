@@ -8,7 +8,7 @@
 import { setupMods, moddedPaths, forgetMods, modsSettled } from './mods.js';
 import { openWritable, writeFile } from './opfs.js';
 import { WORDS } from './words.js';
-import { raceTracker, watchReplay } from './replay-watch.js';
+import { raceTracker, sendLateReplay, watchReplay } from './replay-watch.js';
 
 const $ = (id) => document.getElementById(id);
 const status = (msg, err = false) => { $('status').textContent = msg; $('status').className = err ? 'err' : ''; };
@@ -1791,5 +1791,10 @@ async function init() {
     if (settings.fullscreen && fsSupported() && !fsElement()) toggleFullscreen();   // only allowed inside the click
     start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }); });
   await refresh();
+  // the last race's replay, if it never went with its laps (replay-watch.js)
+  if (gameHere) me.ready.then(async () => {
+    const dir = await gameDir(), mods = (await moddedPaths(dir).catch(() => new Set(['?']))).size > 0;
+    await sendLateReplay({ dir, key: () => me.k, skip: () => mods, log });
+  }).catch(() => {});
 }
 init();

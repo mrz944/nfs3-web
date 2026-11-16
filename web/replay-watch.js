@@ -24,11 +24,38 @@ export function raceTracker() {
   };
 }
 
+const readReplay = async (dir) => { try { return await (await dir.getFileHandle('replay.rp3')).getFile(); } catch { return null; } };
+const digest = async (file) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()))].slice(0, 8).map((x) => x.toString(16).padStart(2, '0')).join('');
+// the replays this browser has offered the server already (their digests), newest last
+const SENT = 'nfs3.replaysSent';
+const sent = () => { try { return JSON.parse(localStorage.getItem(SENT) || '[]'); } catch { return []; } };
+const markSent = (h) => { try { localStorage.setItem(SENT, JSON.stringify([...sent().filter((x) => x !== h), h].slice(-20))); } catch {} };
+// how many times this replay has been offered late (counting this one)
+function tries(h) {
+  try { const o = JSON.parse(localStorage.getItem(SENT + '.tries') || '{}'); const n = o[h] = (o[h] || 0) + 1; localStorage.setItem(SENT + '.tries', JSON.stringify({ [h]: n })); return n; } catch { return 99; }
+}
+
+// When the page opens: the replay of the last race, if it never went to the server (its laps were
+// all refused, or the page was closed first). The server finds its race by the file's time
+// (replays.mjs lateRace). Offered once: kept or not, it isn't offered again.
+export async function sendLateReplay({ dir, key, skip = () => false, log = () => {} }) {
+  try {
+    const f = await readReplay(dir);
+    if (!f || f.size !== 0x296f8 || skip() || !key()) return;
+    const h = await digest(f);
+    if (sent().includes(h)) return;
+    const res = await fetch(`__replay?race=late&at=${Math.round(f.lastModified)}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'x-player-key': key() }, body: await f.arrayBuffer() });
+    const d = await res.json().catch(() => ({}));
+    // kept, or a race it can't be: done. No race for it (yet): asked again on the next 4 visits.
+    if (res.ok || res.status === 409 || (res.status === 404 && tries(h) >= 5)) markSent(h);
+    log(res.ok ? `replay: the last race's replay sent late, linked to the laps of race ${d.race}` : `replay: the last race's replay not taken (${d.error || res.status})`);
+  } catch (e) { log('replay: late one not sent:', e.message); }
+}
+
 // dir: the game's folder (OPFS); race(): the current race; key(): the player key (token);
 // skip(): true while mods are on
 export async function watchReplay({ dir, race, key, skip = () => false, log = () => {}, every = 4000 }) {
-  const read = async () => { try { return await (await dir.getFileHandle('replay.rp3')).getFile(); } catch { return null; } };
-  const digest = async (file) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()))].slice(0, 8).map((x) => x.toString(16).padStart(2, '0')).join('');
+  const read = () => readReplay(dir);
   const f = await read();
   let stamp = f ? f.lastModified : 0, seen = f ? await digest(f).catch(() => '') : '', busy = false;
   async function look() {
@@ -47,6 +74,7 @@ export async function watchReplay({ dir, race, key, skip = () => false, log = ()
       r.replay = true;
       const res = await fetch(`__replay?race=${r.id}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'x-player-key': key() }, body: await g.arrayBuffer() });
       const d = await res.json().catch(() => ({}));
+      if (res.status < 500 && res.status !== 429) markSent(h);
       log(res.ok ? `replay: sent, linked to the laps of race ${r.id}` : `replay: not taken (${d.error || res.status})`);
     } catch (e) { log('replay: not sent:', e.message); } finally { busy = false; }
   }
