@@ -145,10 +145,11 @@ is why clients lagged on 1999-era internet links. Packets are tagged `0xEA` +
   - The server takes it only when that race's laps are this player's and the file's track,
     direction, mirror, night, weather and laps match. It keeps it gzipped, and drops replays no
     board needs after an hour.
-  - The boards link it (▶ replay), and the start page puts it into the game as a saved replay.
-  - The game loads saved replays from `fedata\save\`, but lists them after
-    `SetCurrentDirectoryA(".\fedata\save\")`, which the runtime ignores. So the page also
-    puts a copy in the game's root, where the list looks.
+  - The boards link it (▶ replay), and the start page puts it into the game as a saved replay
+    in `fedata/save` (Load › Replays).
+- The runtime keeps the game's current folder (`SetCurrentDirectoryA`, `runtime/kernel32.c`).
+  Relative paths in the file calls start there. The game lists its saved replays, ghosts,
+  knockouts and tournaments after `SetCurrentDirectoryA(".\fedata\save\")`.
 - Measured natively with `RT_NET_LOSS=10` (drop 10% of incoming packets): the
   game's own protocol already resends a lost packet about one tick later, and
   neither side's send rhythm ever paused for more than 33 ms. The remaining

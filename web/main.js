@@ -985,6 +985,9 @@ async function start() {
   await modsSettled();                                               // mods switched on just now: let them finish copying
   try { modsOn = (await moddedPaths(await gameDir())).size > 0; } catch { modsOn = false; }
   await ensureIni();
+  // the game saves replays, ghosts, knockouts and tournaments in fedata/save, which the download
+  // doesn't make (it has no files)
+  try { await (await (await gameDir()).getDirectoryHandle('fedata')).getDirectoryHandle('save', { create: true }); } catch {}
   await writeGameName($('pname')?.value);
   const startT = performance.now();
   const dev = await deviceInfo();
@@ -1448,9 +1451,8 @@ function setupLaps() {
     const names = new Set(); for (const b of Object.values(data?.boards || {})) for (const r of b) names.add(r.p || 'n:' + r.n.toLowerCase());
     $('laps-count').textContent = names.size ? `${names.size} racer${names.size === 1 ? '' : 's'}` : 'no laps yet';
   }
-  // a replay into the game, or a download when the game isn't in this browser yet. The game
-  // loads saved replays from fedata/save, but lists them from its current folder, which the
-  // runtime keeps at the game's root (SetCurrentDirectoryA does nothing): so a copy goes there too.
+  // a replay into the game (fedata/save, where its Load > Replays list looks), or a download
+  // when the game isn't in this browser yet
   async function takeReplay(e, r) {
     if (!gameHere) return;                                          // no game in this browser: the link downloads it
     e.preventDefault();
@@ -1459,10 +1461,8 @@ function setupLaps() {
     try {
       const res = await fetch(`__replay/${r.rp}.rp3`);
       if (!res.ok) throw new Error(res.status);
-      const bytes = await res.arrayBuffer(), game = await gameDir();
-      const save = await (await game.getDirectoryHandle('fedata')).getDirectoryHandle('save', { create: true });
-      await writeFile(save, name + '.rp3', bytes);
-      await writeFile(game, name + '.rp3', bytes);
+      const save = await (await (await gameDir()).getDirectoryHandle('fedata')).getDirectoryHandle('save', { create: true });
+      await writeFile(save, name + '.rp3', await res.arrayBuffer());
       note.replaceChildren(`${r.n}'s race is in your game as "${name}": Start Game, then Load › Replays. Their best lap was lap ${r.lap} of ${r.laps}. `,
         el('a', { href: `__replay/${r.rp}.rp3`, download: name + '.rp3', textContent: 'Download the file' }), ' for the PC game (its fedata\\save folder).');
       log(`replay: race ${r.rp} saved to the game as fedata/save/${name}.rp3`);
