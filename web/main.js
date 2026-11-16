@@ -903,11 +903,23 @@ let padsAtStart = 0;
 // click itself, not after the awaits in start()); startAudio() then plugs the game into it.
 // iPhone: Web Audio counts as ringer sound, muted by the silent switch, unless the page says it
 // plays media (Safari 17+, navigator.audioSession); set before the context is made.
+// The context runs at 44.1 kHz, the game's mix rate, and the browser converts it to the sound
+// device's rate. ?audiorate=native (remembered; ?audiorate=44100 goes back) runs it at the
+// device's own rate instead, and the worklet converts (audio-worklet.js): a test for Safari,
+// where the sound turned distorted and off pitch after a while.
 let earlyAudio = null;
+function audioRate() {
+  try {
+    const q = new URLSearchParams(location.search).get('audiorate');
+    if (q) localStorage.setItem('nfs3.audioRate', q === 'native' ? 'native' : '44100');
+    return localStorage.getItem('nfs3.audioRate') === 'native' ? 'native' : 44100;
+  } catch { return 44100; }
+}
 function makeAudioContext() {
   try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback'; } catch {}
   try {
-    const ctx = new AudioContext({ sampleRate: 44100, latencyHint: 'interactive' });
+    const rate = audioRate();
+    const ctx = new AudioContext(rate === 'native' ? { latencyHint: 'interactive' } : { sampleRate: 44100, latencyHint: 'interactive' });
     ctx.resume().catch(() => {});
     return { ctx, worklet: ctx.audioWorklet.addModule('audio-worklet.js') };
   } catch (e) { log('audio context failed:', e.message); return null; }
@@ -922,7 +934,16 @@ async function startAudio(mod) {
   node.port.onmessage = (e) => { const { under, secs } = e.data; if (under > 0.05 * 44100 * secs) log(`audio: ${(under / 441 / secs).toFixed(0)}% silence over ${secs.toFixed(0)} s (game mixed too little)`); };
   const gain = new GainNode(ctx, { gain: Math.max(0, Math.min(100, Number(settings.volume) || 0)) / 100 });
   node.connect(gain).connect(ctx.destination);
-  log('audio context:', ctx.state, settings.volume !== 100 ? `(volume ${settings.volume}%)` : '', navigator.audioSession ? `(session ${navigator.audioSession.type})` : '');
+  const lat = () => `${ctx.sampleRate} Hz, latency ${Math.round((ctx.baseLatency || 0) * 1000)}+${Math.round((ctx.outputLatency || 0) * 1000)} ms`;
+  log('audio context:', ctx.state, lat(), settings.volume !== 100 ? `(volume ${settings.volume}%)` : '', navigator.audioSession ? `(session ${navigator.audioSession.type})` : '');
+  // the sound device changing under the page (headphones, a call taking the device) shows as
+  // other latencies: log it, with the time, to line it up with what players hear
+  let was = lat(), wasMs = ((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000;
+  setInterval(() => {
+    const ms = ((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000;
+    if (Math.abs(ms - wasMs) < 5) return;
+    log(`audio context: now ${lat()} (was ${was})`); was = lat(); wasMs = ms;
+  }, 5000);
   // browsers keep audio suspended until a user gesture, and iOS stops it ("interrupted") for a
   // call, Siri or switching apps: then the next touch, click or key press starts it again.
   // Never wait for it here. Touches count as gestures on touchend, not on pointerdown.
