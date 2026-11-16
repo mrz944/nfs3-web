@@ -123,6 +123,17 @@ is why clients lagged on 1999-era internet links. Packets are tagged `0xEA` +
   the player whose worst round trip to anyone is smallest. Hosting matters
   because the host's input counts at once and a client's after one round trip
   to the host.
+- ICE servers come from `/__ice` (`web/serve.mjs`). About a third of the direct
+  links never came up (both players behind strict routers) and fell back to
+  this server, far from many players. With a Cloudflare TURN key in
+  `build/cloudflare/turn.json` the server mints short-lived credentials for
+  TURN servers on Cloudflare's edge (never the key itself) and renews them;
+  without it, STUN only. `tools/turn-check.mjs` tests the key. Joining waits up
+  to 2 s for the list, so links from an invite link get TURN too.
+  - Each link logs the path it took once (candidate types and protocol, no
+    addresses). A link that fails or isn't up after 20 s logs what ICE had:
+    the candidate types, pairs and TURN errors. `?icetest` tries each STUN and
+    TURN server on its own.
 - `web/players.mjs`: players without accounts. Every browser makes a player key: 8 words from
   the EFF short word list (`web/words.js`), kept in its storage. The server gets only a hash of
   the words, and gives the player a random public id. The same words on another device are the
@@ -175,6 +186,19 @@ is why clients lagged on 1999-era internet links. Packets are tagged `0xEA` +
   - Measured natively (`RT_NET_DELAY`, `RT_CARLOG`): at an 80 ms round trip a
     client's steering reaches its game after 34 ms instead of 137 ms; both games
     keep the cars' paths within 0.3 m (95%).
+- **Steady beat** (`runtime/net.c`, `RT_PACE=buffer_ms[:standin_ms]`, default
+  40:250, 0 = off). A client's game advances only when the host's next bundle
+  arrives, so every late bundle froze it (in real races the longest gap in a
+  2 s window is over 150 ms a tenth of the time). The pacer hands the host's
+  stream to the game a little behind the arrivals, through a jitter buffer that
+  grows and shrinks. A late bundle is replaced by a stand-in made from the last
+  one, and the real one is dropped when it comes. The game only waits when the
+  host is silent longer than the stand-in limit. The game sees the pacer's own
+  numbering, and its acks are mapped back to the host's numbers.
+- **Touch controls** (`web/main.js`): the thumb stick, tilt and buttons reach
+  the game as a controller (like a gamepad: steering on X, gas and brake on Y,
+  the rest as its default joystick buttons), and each also sends its key, since
+  the menus only listen to the keyboard. A finger on the picture is the mouse.
 - Runtime fixes that online play needed: `GetSystemMetrics(SM_NETWORK)` must
   be 1 (otherwise every network option is greyed out); `closesocket` must wake
   threads blocked in `recvfrom`/`select`; `WaitForMultipleObjects(bWaitAll)`

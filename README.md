@@ -28,7 +28,10 @@ network stack are replaced by a small runtime written for the web.
 - 🏎️ **The real game.** The original code runs, recompiled, not reimplemented.
 - 🎮 **GPU rendering.** The game's Voodoo2 (Glide 3) path goes straight to WebGL 2 at a sharp integer scale.
 - 🌐 **Online play in the browser.** Up to 8 racers per room, direct browser-to-browser
-  connections (WebRTC) with a relay fallback, room browser, passwords and invite links.
+  connections (WebRTC) through TURN or the server when they can't connect, room browser, passwords and invite links.
+- 🏁 **Lap records with replays.** Every racer's best lap per track, under a name that's theirs
+  (a passphrase, no account), with the game's own replay of that race.
+- 📱 **Phones and tablets.** Touch buttons, a thumb stick or tilt steering.
 - 🌍 **Hosted game files.** The server supplies the game files automatically. Each
   browser downloads them once and caches them in private storage.
 - 💾 **No install.** After the first download, Start is one click.
@@ -63,12 +66,27 @@ from the authors' archives (each saved as `<id>.zip`, ids in `web/mods.json`) wi
 game files). Switching it on copies the files into the game in the browser (`web/mods.js`),
 backing up what they replace; switching it off puts the originals back.
 
+**Lap records, names and replays.** The start page keeps every racer's best lap on each track,
+in both directions, tagged for mirrored, night, weather and instant steering (laps driven with
+mods on don't count). Each browser gets a player key, 8 words that are never shown unless you ask:
+the server stores only a hash of them. The key owns your name, so you can change it and your laps
+go with it, and the same 8 words on another device make you the same racer there
+(*Your name › Use on another device*). After every race that isn't online, the game's own replay
+of it (`replay.rp3`) goes up with the laps, and **▶ replay** on a best lap puts that replay into
+your game under *Load › Replays*.
+
+**Phones and tablets.** On-screen buttons, a thumb stick or tilting the phone like a wheel. The
+game takes them as a controller, so steering is gentle or hard as with a gamepad. A finger on
+the picture works as the mouse. `?touch=1` shows the controls anywhere, `?touch=0` hides them.
+
 **Our runtime fixes.** A few things the game expects from Windows had to be emulated precisely
 before it ran correctly, for example:
 - the `NUL` device that the car screen opens;
 - `WaitForMultipleObjects` semantics, whose bug caused an occasional start-up hang;
 - socket close waking blocked readers, which froze race starts;
-- the Glide `grGet` query IDs.
+- the Glide `grGet` query IDs;
+- `SetCurrentDirectoryA`, without which saved replays, ghosts, knockouts and tournaments never
+  appeared under *Load*.
 
 These fixes live in the runtime, not in the game's code or data.
 
@@ -129,8 +147,14 @@ NFS3 Web makes a **room** on the server look like a LAN to the game:
   browser finds the host automatically, so nobody types an IP address.
 - Browsers connect **directly to each other** with WebRTC data channels. They're unordered and never
   retransmit, and every message also carries the previous two packets, so a lost packet is
-  recovered with the next one about 31 ms later. Peers that can't connect directly are relayed
-  by the server.
+  recovered with the next one about 31 ms later. Peers that can't connect directly link through
+  TURN servers close to them (Cloudflare, when the server has a key in
+  `build/cloudflare/turn.json`; check it with `node tools/turn-check.mjs`), and otherwise through
+  this server. The room shows each link as direct, via TURN or via server.
+- Clients hand the host's updates to the game at a **steady beat** (a small jitter buffer with
+  stand-ins for late updates), so a late packet no longer freezes the race.
+- `?icetest` logs what each STUN and TURN server gives this browser, for players whose links
+  never come up.
 - The lobby shows each player's ping and recommends the **best host**: the host's car reacts
   instantly, and everyone else waits one round trip to the host.
 - Your lobby name is also your name in the game (up to 10 characters), and a room only takes
@@ -204,22 +228,41 @@ Keyboard controls are the original ones. Click the picture to capture the mouse,
 | `--funnel [port]` | publish the page, game files and `web/dist/` through Tailscale Funnel, open to everyone. Default public port 443 (no port in the URL), forwarding to the local server port; supported ports 443, 8443 or 10000 |
 | `--daily HH:MM` | a daily race at that time (server clock): countdown on the start page, push notifications 10 minutes before and at the start |
 | `--relay-tcp PORT\|PATH` | lobby endpoint for native test builds (`RT_NET=…`) |
+| `--data DIR` | keep the server's data in DIR instead of `build/` (for test servers) |
 
-The server also collects **page logs** (`build/clientlogs/`) and **cookie-free analytics**
-(`build/analytics/`, summary at `/__stats`). Both stay on your machine. `/__stats` asks for a
-password (any user name): `NFS3_STATS_PASSWORD`, or the one the server writes to
-`build/stats-password` on first start.
+The server keeps its data in `build/`, on your machine only:
+
+| Folder | What's in it |
+|---|---|
+| `clientlogs/` | page logs per session, room logs |
+| `analytics/` | cookie-free analytics, summary at `/__stats` |
+| `laps/` · `replays/` | lap records · their replays (gzipped) |
+| `players/` | players (hashed keys, names) and which sessions were whose |
+| `push/` | Web Push keys and subscriptions |
+| `cloudflare/turn.json` | the optional TURN key |
+
+`/__stats` asks for a password (any user name): `NFS3_STATS_PASSWORD`, or the one the server
+writes to `build/stats-password` on first start. Its Players section looks up one player;
+`node tools/players.mjs` does the same from the terminal and fixes names and laps by hand
+(`who`, `list`, `give`, `rename`, `forget`).
+
+**Community.** *What's New* on the start page reads `web/changelog.json`, and
+`node tools/discord/changelog.mjs` posts the same days to Discord. `tools/discord/setup.mjs`
+sets up the Discord server's channels, roles and texts from `content.mjs` (see
+[Discord](docs/discord.md)).
 
 ## Project layout
 
 ```
-tools/        lifter (lift.py), PE parser, profiler, test helpers
+tools/        lifter (lift.py), PE parser, profiler, test helpers, game packs,
+              mods, players.mjs, turn-check.mjs, discord/ (server setup, changelog)
 runtime/      Win32 / DirectX / Glide / WSOCK runtime (C), GPU renderer
 web/          page (index.html, main.js), lobby + relay (relay.mjs, net.js),
               dev server (serve.mjs), analytics (analytics.mjs), lap records
               (laps.mjs), players and their passphrases (players.mjs, words.js),
-              lap replays (replays.mjs, replay-watch.js)
-docs/         screenshots
+              lap replays (replays.mjs, replay-watch.js), push (push.mjs), mods
+              (mods.js), What's New (changelog.json)
+docs/         hosting (cloudflare.md, r2.md), Discord (discord.md), screenshots
 build.sh      lift + native build          build-web.sh   Emscripten build
 gen/ build/ web/dist/ game/               local only, never committed
 ```
@@ -250,7 +293,8 @@ bugs much easier to chase than in a browser.
 ## Status
 
 - ✅ Menus, car showcase, single races, Hot Pursuit, GPU rendering, sound, keyboard and mouse
-- ✅ Online: lobby, rooms with passwords, 2-player races tested across browsers
+- ✅ Online: lobby, rooms with passwords, TURN, the steady beat, races tested across browsers
+- ✅ Lap records with player names and replays; phones and tablets; gamepads and wheels; mods
 - 🚧 Next: rollback (prediction) netcode so clients have no input lag either; wider browser testing
 
 ## Credits
