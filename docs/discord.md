@@ -6,8 +6,8 @@ match that file, and can be run again after any edit.
 
 | Category | Channels |
 |---|---|
-| Start here | `#rules` (read-only, the Community rules channel), `#changelog` (announcements, can be followed from other servers), `#faq` (read-only) |
-| Community | `#general`, `#help` |
+| Start here | `#rules` (read-only, the Community rules channel), `#welcome` (read-only; Discord's join messages), `#changelog` (announcements, can be followed from other servers), `#faq` (read-only) |
+| Community | `#general-english`, `#general-international` (any language), `#help` |
 | Feedback | `#bug-reports` and `#suggestions`: forums, a tag required (game; device for bugs), status tags only moderators can set |
 | Staff | `#mod-chat`: Developer and Moderator only; Discord's Community notices and AutoMod alerts go here |
 
@@ -38,7 +38,7 @@ Discord doesn't let bots create servers, so two things are done by hand, once.
    ```
 
    It prints the permanent invite (`https://discord.gg/...`). Discord's default `#general` is
-   reused; the default *Voice Channels* category and its *General* voice channel are left alone
+   reused as `#general-english`; the default *Voice Channels* category and its *General* voice channel are left alone
    (delete them in Discord if you don't want them).
 
 The bot only acts when a script runs. Keep it in the server for `changelog.mjs` and later edits

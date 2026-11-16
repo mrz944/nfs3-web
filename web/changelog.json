@@ -2,6 +2,11 @@
   "game": "NFS III",
   "about": "What changed on nfs3.xyz, day by day. Kinds: new, improved, fixed. Days run 05:00 to 05:00 Polish time. tools/discord/changelog.mjs posts them to Discord.",
   "days": [
+    { "date": "2026-11-16", "items": [
+      ["new", "Your name is yours: change it whenever you like and your lap records go with it. The Lap Records and Most Active Racers show each racer once, with their best. Records from before stay with the name they were driven under, and go to whoever comes back with that name saved."],
+      ["new", "Race as yourself on another device: Use on another device, under Your name, shows 8 words. Enter them on your phone or another computer to race there with your name and lap records. No account, no e-mail."],
+      ["improved", "Online: joining straight from an invite link now waits a moment for the relay servers close to you, so fewer links fall back to this site's server."]
+    ] },
     { "date": "2026-11-15", "items": [
       ["new", "Phones: steer with a thumb stick or by tilting the phone like a wheel, gently or hard, as with a gamepad. The round button at the top right switches between buttons, stick and tilt during the game."],
       ["new", "Phones: touch buttons for camera, look behind, reset and horn, and optional gear buttons for a manual gearbox. Game Settings set the steering, the size of the controls and which thumb steers."],

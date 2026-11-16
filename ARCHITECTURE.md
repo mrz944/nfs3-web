@@ -123,6 +123,19 @@ is why clients lagged on 1999-era internet links. Packets are tagged `0xEA` +
   the player whose worst round trip to anyone is smallest. Hosting matters
   because the host's input counts at once and a client's after one round trip
   to the host.
+- `web/players.mjs`: players without accounts. Every browser makes a player key: 8 words from
+  the EFF short word list (`web/words.js`), kept in its storage. The server gets only a hash of
+  the words, and gives the player a random public id. The same words on another device are the
+  same player there (Your Passphrase on the start page).
+  - A name belongs to one player: compared without case or look-alike digits, held for 7 days
+    after a change, 3 changes a day.
+  - Lap records (`web/laps.mjs`) and the most active racers are one row per player, under the
+    current name. Laps from before player keys count for the player who took that name, else
+    stay one row per name.
+  - The relay refuses a name another player owns.
+  - Analytics events, play and connection logs, room logs and session logs carry the player id.
+    `/__stats` has a Players section with a lookup, and `tools/players.mjs` does the same from
+    the terminal and fixes what players can't (an earlier name's laps, a lost passphrase).
 - Measured natively with `RT_NET_LOSS=10` (drop 10% of incoming packets): the
   game's own protocol already resends a lost packet about one tick later, and
   neither side's send rhythm ever paused for more than 33 ms. The remaining

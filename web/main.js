@@ -7,6 +7,7 @@
 
 import { setupMods, moddedPaths, forgetMods, modsSettled } from './mods.js';
 import { openWritable, writeFile } from './opfs.js';
+import { WORDS } from './words.js';
 
 const $ = (id) => document.getElementById(id);
 const status = (msg, err = false) => { $('status').textContent = msg; $('status').className = err ? 'err' : ''; };
@@ -35,9 +36,54 @@ function flushLog(beacon = false) {
 }
 setInterval(flushLog, 3000);
 
-// page analytics (web/analytics.mjs on our own server: no cookies, no third parties)
+// ------------------------------------------------------------------ player key
+// This browser races as a player (web/players.mjs): 8 words from words.js, made here once and
+// kept in localStorage. The server only ever gets their SHA-256, the token (me.k), with laps,
+// rooms, name changes and page events. The same words on another device are the same player
+// there (setupPlayer: Your Passphrase).
+const PLAYER_STORE = 'nfs3.player';
+const me = { words: '', k: '', p: null, n: '', ready: null };
+const WORD_SET = new Set(WORDS);
+function newWords() {
+  const out = [], r = new Uint16Array(16);
+  while (out.length < 8) { crypto.getRandomValues(r); for (const x of r) if (x < 64800 && out.length < 8) out.push(WORDS[x % WORDS.length]); }   // 64800 = 50 x 1296: no bias
+  return out.join(' ');
+}
+// typed or pasted words, each one maybe cut to its first 3 or more letters (the list tells
+// its words apart by 3)
+function readWords(text) {
+  const words = [];
+  for (const t of String(text || '').toLowerCase().split(/[^a-z-]+/).map((w) => w.replace(/^-+|-+$/g, '')).filter(Boolean)) {
+    if (WORD_SET.has(t)) { words.push(t); continue; }
+    const m = t.length >= 3 ? WORDS.filter((w) => w.startsWith(t)) : [];
+    if (m.length !== 1) return { words, bad: t };
+    words.push(m[0]);
+  }
+  return { words };
+}
+async function tokenOf(words) {
+  const b = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('nfs3 player v1:' + words)));
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+async function setKey(words) {
+  const k = await tokenOf(words);
+  Object.assign(me, { words, k, p: null, n: '' });
+  try { localStorage.setItem(PLAYER_STORE, JSON.stringify({ w: words, k })); } catch {}
+}
+try { const s = JSON.parse(localStorage.getItem(PLAYER_STORE) || 'null'); if (s?.w && /^[0-9a-f]{64}$/.test(s.k)) { me.words = s.w; me.k = s.k; } } catch {}
+me.ready = me.k ? Promise.resolve() : setKey(newWords()).catch(() => {});   // no crypto.subtle (not https): no player
+// the players endpoints (players.mjs); null from a server without them, or when offline
+async function playerApi(path, body) {
+  try {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return (r.headers.get('content-type') || '').includes('json') ? await r.json() : null;
+  } catch { return null; }
+}
+
+// page analytics (web/analytics.mjs on our own server: no cookies, no third parties); with the
+// player key, so one player's visits can be told apart from another's
 function track(e, d = {}) {
-  const body = JSON.stringify({ e, s: logSession, d });
+  const body = JSON.stringify({ e, s: logSession, d, k: me.k || undefined });
   try { if (!navigator.sendBeacon('__event', body)) fetch('__event', { method: 'POST', body, keepalive: true }).catch(() => {}); } catch {}
 }
 const pageT0 = Date.now();
@@ -1119,6 +1165,39 @@ const savedPass = (code) => { try { return sessionStorage.getItem('nfs3.pass.' +
 const savePass = (code, pw) => { try { pw ? sessionStorage.setItem('nfs3.pass.' + code, pw) : sessionStorage.removeItem('nfs3.pass.' + code); } catch {} };
 let gameStarted = false;
 
+// ------------------------------------------------------------------ the player's name
+// "Your name" is the name of this browser's player (players.mjs). While it is typed the server
+// says whose a name is; a change is taken on Enter or when the field is left, and the lap
+// records follow it. A server without players (older) answers nothing: the name then works as
+// before, and no hint shows.
+let playersOn = false;
+const NAME_HINTS = {
+  yours: ['ok', 'Yours, with your lap records.'],
+  free: ['', 'Free: it becomes yours with your first lap or room.'],
+  old: ['ok', 'Has lap records from before: they become yours with it.'],
+  taken: ['bad', "Another player's name. Pick another, or if it's yours, enter your passphrase:"],
+  bad: ['bad', 'Please pick another name.'],
+  limit: ['bad', 'Three name changes a day: try again tomorrow.'],
+  busy: ['bad', 'The server is busy. Try again in a minute.'],
+};
+function nameHint(state, pre = '') {
+  const h = $('name-hint'); if (!h) return;
+  if (!playersOn || !NAME_HINTS[state]) { h.hidden = true; return; }
+  const [cls, text] = NAME_HINTS[state];
+  h.className = 'namehint ' + cls; h.hidden = false;
+  h.replaceChildren(document.createTextNode(`${pre ? pre + ' ' : ''}${text} `), Object.assign(document.createElement('a'), { href: '#player', textContent: 'Use on another device' }));
+}
+// the server's word on our player ({p, n}): the name field follows it
+function playerIs(r, why = '') {
+  if (!r?.p) return;
+  const changed = me.p !== r.p || me.n !== r.n;
+  me.p = r.p; me.n = r.n;
+  const f = $('pname');
+  if (r.n && f && f.value.trim() !== r.n) { f.value = r.n; try { localStorage.setItem('nfs3.name', r.n); } catch {} }
+  if (changed) { log(`player ${r.p} ${r.n}${why ? ` (${why})` : ''}`); document.dispatchEvent(new Event('nfs3-player')); }
+  nameHint('yours');
+}
+
 function setupOnline() {
   const name = $('pname');
   // a name from the start: the saved one, else a random Player1234 (everyone being "Player"
@@ -1130,6 +1209,42 @@ function setupOnline() {
     try { localStorage.setItem('nfs3.name', name.value.trim()); } catch {}
   });
   const myName = () => cleanName(name.value).trim();
+  // whose our name is: asked once at start (a browser whose saved name has lap records from
+  // before player keys takes them here), then while typing; changed on Enter or leaving the field
+  me.ready.then(async () => {
+    if (!me.k) return;
+    const r = await playerApi('__me', { k: me.k, n: myName(), s: logSession });
+    if (!r) return;
+    playersOn = true;
+    if (r.p) playerIs(r, r.claimed ? 'took the lap records from before under this name' : '');
+    else nameHint(r.state);
+  });
+  let checkTimer = 0;
+  name.addEventListener('input', () => {
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(async () => {
+      const n = myName();
+      if (!playersOn || !n) return;
+      if (me.p && n === me.n) { nameHint('yours'); return; }
+      const r = await fetch('__name?n=' + encodeURIComponent(n), { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
+      if (r && myName() === n) nameHint(r.owner && r.owner === me.p ? 'yours' : r.state);
+    }, 350);
+  });
+  name.addEventListener('change', async () => {
+    const n = myName();
+    if (!playersOn || !me.k || !n || n === me.n) return;
+    clearTimeout(checkTimer);
+    const r = await playerApi('__name', { k: me.k, n, s: logSession });
+    if (!r) return;
+    if (r.error) {
+      log(`name: ${n} not taken (${r.error})`);
+      if (r.p) playerIs(r);          // back to the name the player has (no player yet: the field keeps what was typed)
+      nameHint(r.error, `${n}:`); return;
+    }
+    playerIs(r, r.claimed ? 'took the lap records from before under this name' : 'new name');
+  });
+  // rooms: the relay gets the key too, and plays us under our player's name
+  net.player = () => me.ready.then(() => (me.k ? { k: me.k, s: logSession } : null));
   const needName = () => {
     if (myName()) return false;
     message('Enter your name first.'); name.focus(); return true;
@@ -1242,6 +1357,9 @@ function setupOnline() {
   net.addEventListener('rooms', redraw);
   net.addEventListener('status', drawRoom);
   net.addEventListener('log', (e) => log('online:', e.detail));
+  // ?icetest: try each STUN and TURN server on its own and log what each gives (for players
+  // whose links never come up)
+  if (new URLSearchParams(location.search).has('icetest')) { net.fetchIce(); net.iceWait().then(() => net.probeIce()); }
   net.addEventListener('disconnected', () => { server('offline', 'bad'); redraw(); if (!gameStarted) setTimeout(connect, 3000); });
 
   // invite links (#room=code) join straight away (asking for the password if needed)
@@ -1285,9 +1403,15 @@ function reportLap(track, flags, code, lap, laps, ticks) {
   if (modsOn) return;
   const n = cleanName($('pname')?.value).trim();
   if (!n) return;
+  // with the player key: the lap is the player's, under its name on the server (players.mjs)
   fetch('__lap', { method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
-    body: JSON.stringify({ n, track, f: flags & 31, car, lap, laps, ticks, b: buildInfo?.built || '' }) })
-    .then((r) => r.ok && r.json()).then((d) => { if (d?.best) log('lap records: a new best lap for', n); }).catch(() => {});
+    body: JSON.stringify({ n, k: me.k || undefined, s: logSession, track, f: flags & 31, car, lap, laps, ticks, b: buildInfo?.built || '' }) })
+    .then(async (r) => {
+      const d = await r.json().catch(() => null);
+      if (!r.ok) { log(`lap records: not sent (${d?.error === 'taken' ? `${n} is another player's name` : d?.error || r.status})`); return; }
+      if (d?.p) playerIs(d);
+      if (d?.best) log('lap records: a new best lap for', d?.n || n);
+    }).catch(() => {});
 }
 function setupLaps() {
   const sel = $('laps-track');
@@ -1305,14 +1429,16 @@ function setupLaps() {
     sel.value = ids.has(Number(want)) ? want : '2';
   }
   function draw() {
-    const me = cleanName($('pname')?.value).trim(), rows = board(sel.value, dir);
+    // our row: by player id (players.mjs), or by name for a server without players
+    const myName = cleanName($('pname')?.value).trim(), rows = board(sel.value, dir);
+    const mine = (r) => (me.p ? r.p === me.p : r.n === myName);
     const age = (t) => { const d = Math.floor((Date.now() - t) / 864e5); return d < 1 ? 'today' : d === 1 ? 'yesterday' : d < 60 ? `${d} days ago` : new Date(t).toLocaleDateString(); };
-    $('laps-list').replaceChildren(...(rows.length ? rows.map((r, i) => el('li', { className: r.n === me ? 'me' : '' },
+    $('laps-list').replaceChildren(...(rows.length ? rows.map((r, i) => el('li', { className: mine(r) ? 'me' : '' },
       el('span', { className: 'r', textContent: i + 1 }), el('span', { className: 'n', textContent: r.n }),
       el('span', { className: 'tm', textContent: lapTime(r.ticks) }),
       el('span', { className: 'c', textContent: carName(r.car), title: age(r.t) }, ...LAP_TAGS.filter(([b]) => r.f & b).map(([, t, title]) => el('span', { className: 'ltag', textContent: t, title })))))
       : [el('li', { className: 'muted', textContent: `No laps on ${trackName(Number(sel.value))} ${dir === 'b' ? 'backward' : 'forward'} yet. Finish one and it shows here.` })]));
-    const names = new Set(); for (const b of Object.values(data?.boards || {})) for (const r of b) names.add(r.n);
+    const names = new Set(); for (const b of Object.values(data?.boards || {})) for (const r of b) names.add(r.p || 'n:' + r.n.toLowerCase());
     $('laps-count').textContent = names.size ? `${names.size} racer${names.size === 1 ? '' : 's'}` : 'no laps yet';
   }
   sel.onchange = () => { want = sel.value; try { localStorage.setItem('nfs3.lapsTrack', want); } catch {} draw(); };
@@ -1323,6 +1449,7 @@ function setupLaps() {
     draw();
   };
   $('pname')?.addEventListener('input', () => data && draw());
+  document.addEventListener('nfs3-player', () => poll());       // a new name or another player: fresh boards
   const poll = () => fetch('__laps', { cache: 'no-store' }).then((r) => r.ok && r.json()).then((d) => { if (d) { data = d; options(); draw(); } }).catch(() => {});
   options(); draw(); poll();
   setInterval(() => { if (!gameStarted) poll(); }, 60000);
@@ -1470,6 +1597,87 @@ function setupChangelog(prefix) {
   load().then((d) => { if ((d.days[0]?.date || '') > seen) btn.classList.add('fresh'); }).catch(() => {});
 }
 
+// Your Passphrase (#player): this browser's 8 words, to copy, download or keep in the browser's
+// passwords, and the words of another device to race as that player here (players.mjs).
+function setupPlayer() {
+  const dlg = $('player');
+  if (!dlg) return;
+  const msg = (t, ok = false) => { $('pl-msg').textContent = t || ''; $('pl-msg').hidden = !t; $('pl-msg').className = 'msg' + (ok ? ' ok' : ''); };
+  const note = (t) => { $('pl-note').textContent = t || ''; $('pl-note').hidden = !t; };
+  const name = () => me.n || cleanName($('pname')?.value).trim() || 'Player';
+  function draw() {
+    $('pl-words').textContent = me.words || '(this browser can\'t keep a passphrase: it needs https and site storage)';
+    $('pl-name').textContent = name();
+    $('pl-bring-l').hidden = !me.p;
+    $('pl-bring-t').textContent = `Bring this browser's lap records along (as ${name()})`;
+    $('pl-save').hidden = !window.PasswordCredential;
+  }
+  async function open() {
+    msg(''); note(''); $('pl-in').value = ''; $('pl-read').textContent = '';
+    if (!dlg.open) { try { dlg.showModal(); } catch { dlg.setAttribute('open', ''); } }
+    await me.ready; draw();
+    // the words only work on another device once the player is on the server
+    if (!me.p && me.k) {
+      const r = await playerApi('__name', { k: me.k, n: cleanName($('pname')?.value).trim(), s: logSession });
+      if (r?.p) { playerIs(r); draw(); }
+      else if (r?.error === 'taken') msg(`${cleanName($('pname')?.value).trim()} is another player's name: pick your own under Your name first, or enter the passphrase of the player it is.`);
+    }
+  }
+  const text = () => `nfs3.xyz passphrase of ${name()}\n\n${me.words}\n\nOn another phone or computer: nfs3.xyz > Your name > Use on another device, then enter these words to race there as ${name()}, with your lap records.\nKeep them to yourself: anyone who has them can race as you.\n`;
+  $('pl-copy').onclick = () => navigator.clipboard?.writeText(me.words).then(() => note('Copied.'), () => note('Copying didn\'t work here: select the words and copy them.'));
+  $('pl-download').onclick = () => {
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([text()], { type: 'text/plain' })), download: 'nfs3-passphrase.txt' });
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  // Chrome, Edge: into the browser's own passwords, which sync to the player's other devices
+  $('pl-save').onclick = async () => {
+    try { await navigator.credentials.store(new window.PasswordCredential({ id: name(), name: name(), password: me.words })); note('Saved in the browser\'s passwords (if it asked, and you said yes).'); }
+    catch (e) { note(`The browser didn't save it (${e.name}). Copy the words instead.`); }
+  };
+  $('pl-in').addEventListener('input', () => {
+    const r = readWords($('pl-in').value);
+    $('pl-read').className = 'muted' + (r.bad ? ' bad' : '');
+    $('pl-read').textContent = r.bad ? `"${r.bad}" is not one of the passphrase words.` : r.words.length ? `${r.words.length} of 8: ${r.words.join(' ')}` : '';
+  });
+  $('pl-use').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const r = readWords($('pl-in').value);
+    if (r.bad || r.words.length !== 8) { msg(r.bad ? `"${r.bad}" is not one of the passphrase words.` : `That's ${r.words.length} words: a passphrase has 8.`); return; }
+    const words = r.words.join(' ');
+    if (words === me.words) { msg('That is this browser\'s own passphrase.'); return; }
+    const k = await tokenOf(words);
+    const who = await playerApi('__me', { k, s: logSession });
+    if (!who) { msg('The server didn\'t answer. Try again in a moment.'); return; }
+    if (!who.p) { msg('No player has this passphrase. Check the words.'); return; }
+    const bring = me.p && me.p !== who.p && $('pl-bring').checked, was = name();
+    if (bring) {
+      const m = await playerApi('__merge', { k, from: me.k, s: logSession });
+      if (!m?.p) { msg('Bringing the lap records along didn\'t work. Try again in a moment.'); return; }
+    }
+    await setKey(words);
+    playerIs(who, `passphrase from another device${bring ? `, with the lap records of ${was}` : ''}`);
+    draw(); $('pl-in').value = ''; $('pl-read').textContent = '';
+    msg(`This browser now races as ${who.n}${bring ? `, with ${was}'s lap records` : ''}.`, true);
+  });
+  $('pl-forget').addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (!me.k || !confirm(`Delete ${name()}? Its name and lap records go from the server, here and on every device with this passphrase. This can't be undone.`)) return;
+    const r = await playerApi('__forget', { k: me.k });
+    if (!r?.ok) { msg('The server didn\'t answer. Try again in a moment.'); return; }
+    log(`player ${me.p || '-'} deleted`);
+    await setKey(newWords());
+    document.dispatchEvent(new Event('nfs3-player'));
+    nameHint('free'); draw(); msg('Deleted. This browser has a new passphrase.', true);
+  });
+  $('player-close').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+  dlg.addEventListener('close', () => { if (location.hash === '#player') history.replaceState(null, '', location.pathname + location.search); });
+  document.addEventListener('click', (e) => { const a = e.target.closest?.('a[href="#player"]'); if (a) { e.preventDefault(); open(); } });
+  const fromHash = () => { if (location.hash === '#player') open(); };
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+}
+
 async function init() {
   setupLogToggle();
   setupSettings();
@@ -1478,6 +1686,7 @@ async function init() {
   setupActivity();
   setupLaps();
   setupChangelog('nfs3.');
+  setupPlayer();
   watchPads();
   showHomeScreenCard();
   if (isWebApp()) log('started from the home screen (web app)');

@@ -15,6 +15,9 @@ export const GAMES = [
 export const SERVER = {
   name: 'NFS Classics Web',
   description: 'Classic Need for Speed PC games recompiled to run in your browser: nfs2se.xyz, nfs3.xyz and nfs4.xyz. Fan project.',
+  // Discord's own messages (a new member joined, boosts) go to this channel. Flags: 4 no setup
+  // tips, 8 no "wave to say hi" button under join messages (members can't post there).
+  systemChannel: 'welcome', systemChannelFlags: 4 | 8,
 };
 
 export const ROLES = [
@@ -30,11 +33,14 @@ const siteList = GAMES.map((g) => `- **${g.name}** (${g.year}): <https://${g.sit
 export const CHANNELS = [
   { key: 'info', kind: 'category', name: 'Start here' },
   { key: 'rules', kind: 'text', parent: 'info', name: 'rules', readonly: true, topic: 'Server rules and links to the games. Read before posting.' },
+  { key: 'welcome', kind: 'text', parent: 'info', name: 'welcome', readonly: true, topic: 'New members show up here. Say hi in #general-english or #general-international.' },
   { key: 'changelog', kind: 'announcement', parent: 'info', name: 'changelog', readonly: true, topic: 'What changed on nfs2se.xyz, nfs3.xyz and nfs4.xyz. Follow it to get updates in your own server.' },
   { key: 'faq', kind: 'text', parent: 'info', name: 'faq', readonly: true, topic: 'Common questions: browsers, game files, phones, controllers, online races.' },
 
   { key: 'community', kind: 'category', name: 'Community' },
-  { key: 'general', kind: 'text', parent: 'community', name: 'general', topic: 'Talk about the games, races, old memories. Bugs go to #bug-reports, ideas to #suggestions.' },
+  // was: older names, so a rename keeps the channel and its messages
+  { key: 'general', kind: 'text', parent: 'community', name: 'general-english', was: ['general'], topic: 'In English: talk about the games, races, old memories. Other languages in #general-international. Bugs go to #bug-reports, ideas to #suggestions.' },
+  { key: 'international', kind: 'text', parent: 'community', name: 'general-international', topic: 'Any language: find racers who speak yours. Bugs go to #bug-reports, ideas to #suggestions.' },
   { key: 'help', kind: 'text', parent: 'community', name: 'help', topic: 'Stuck? Say which game, your browser and device, and what you see.' },
 
   { key: 'feedback', kind: 'category', name: 'Feedback' },
@@ -88,11 +94,13 @@ ${siteList}
 - {#bug-reports}: something broken? one post per bug
 - {#suggestions}: ideas for the games and the sites
 - {#changelog}: what changed, follow it for updates
-- {#general}: everything else`,
+- {#general-english}: everything else, in English
+- {#general-international}: everything else, in any language
+- {#welcome}: new members arriving`,
 
 `# Rules
 **1. Be decent.** No harassment, hate speech, slurs or personal attacks. Argue with ideas, not people.
-**2. English in the public channels**, so everyone can follow.
+**2. English in the public channels**, so everyone can follow. Any language is welcome in {#general-international}.
 **3. Right channel.** Questions in {#help}, bugs in {#bug-reports}, ideas in {#suggestions}.
 **4. No piracy.** Don't share or ask for game downloads, ISOs, cracks or CD keys.
 **5. No spam or ads.** No self-promotion, no invite links to other servers, no unsolicited DMs.
@@ -130,6 +138,7 @@ Yes, on nfs3.xyz at 20:00 Polish time (CET/CEST). The start page shows it, and c
 
 **Lap records?**
 nfs2se.xyz and nfs3.xyz list each racer's best lap per track and direction on the start page. Laps driven with mods on don't count.
+On nfs3.xyz your name and laps belong to you: change the name any time and your records follow. To race as you on another device, use **Use on another device** under Your name: its 8 words (your passphrase) bring your name and laps there. Your player id, never the passphrase, is in the site's technical logs, so problems you report can be found.
 
 **Where are my saves and settings?**
 In your browser's storage for that site, together with the game files. Clearing the site's data deletes them, and the game downloads again.

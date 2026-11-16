@@ -119,7 +119,9 @@ async function ensure(c) {
     Object.assign(body, { flags: c.requireTag ? 16 : 0, default_sort_order: 0, default_forum_layout: 1, default_reaction_emoji: c.reaction ? { emoji_id: null, emoji_name: c.reaction } : null });
   }
   // by name and kind; a text channel of that name may become the announcement channel
-  const have = channels.find((x) => x.name.toLowerCase() === c.name.toLowerCase() && (x.type === type || (type === 5 && x.type === 0)));
+  const names = [c.name, ...(c.was || [])].map((n) => n.toLowerCase());
+  const fits = (x) => x.type === type || (type === 5 && x.type === 0);
+  const have = channels.find((x) => x.name.toLowerCase() === c.name.toLowerCase() && fits(x)) || channels.find((x) => names.includes(x.name.toLowerCase()) && fits(x));
   if (c.kind === 'forum') {                       // keep the ids of tags that are there already
     const old = have?.available_tags || [];
     body.available_tags = c.tags.map((t) => {
@@ -161,6 +163,9 @@ if (!guild.features.includes('COMMUNITY')) {
 } else if (guild.description !== SERVER.description || guild.rules_channel_id !== chan.rules) {
   await write('update the description and rules channel', 'PATCH', `/guilds/${guildId}`, { description: SERVER.description, rules_channel_id: chan.rules });
 }
+const sys = chan[SERVER.systemChannel];
+if (sys && !sys.startsWith('new:') && (guild.system_channel_id !== sys || guild.system_channel_flags !== SERVER.systemChannelFlags))
+  await write(`send Discord's join messages to #${SERVER.systemChannel}`, 'PATCH', `/guilds/${guildId}`, { system_channel_id: sys, system_channel_flags: SERVER.systemChannelFlags });
 if (guild.name !== SERVER.name) await write(`rename the server to ${SERVER.name}`, 'PATCH', `/guilds/${guildId}`, { name: SERVER.name });
 
 // the server icon and the bot's avatar (tools/discord/icons.html), uploaded when the file changed
