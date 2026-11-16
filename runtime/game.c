@@ -26,7 +26,9 @@
  * Lap times for the start page's lap records: each car (the table at 0x5efac8, 8 pointers) counts
  * its finished laps at +0x204 and keeps each lap's time at +0x240 + 4 * lap (8 laps, in 1/64 s);
  * +0x1e4 is the car's model code ("merc"), +0x1f0 its slot. The race: track number at 0x6fd4ac,
- * then backward 0x6fd4c0, mirrored 0x6fd4c4, night 0x6fd4c8, weather 0x6fd4cc, laps 0x6fd4d0.
+ * then backward 0x6fd4c0, mirrored 0x6fd4c4, night 0x6fd4c8, weather 0x6fd4cc, and the race's
+ * laps at 0x6fd4b4 (the count the game ends the race at, 0x4ce48b; 0x6fd4d0 is only the Single
+ * Race menu's setting: 2 in a 4-lap knockout round, 0 in some modes).
  * Each lap the local player finishes goes to the page (Module.onLap), and to the log. */
 #include "rt.h"
 #include <string.h>
@@ -85,7 +87,7 @@ uint8_t *game_config_write(const char *path, int64_t pos, const uint8_t *buf, ui
 #define RACE_MIRRORED 0x6fd4c4u
 #define RACE_NIGHT 0x6fd4c8u
 #define RACE_WEATHER 0x6fd4ccu
-#define RACE_LAPS 0x6fd4d0u
+#define RACE_LAPS 0x6fd4b4u
 static void lap_report(uint32_t car, int lap, uint32_t ticks) {
     uint32_t code = RD32(car + 0x1e4);
     int track = (int)RD32(RACE_TRACK), laps = (int)RD32(RACE_LAPS);

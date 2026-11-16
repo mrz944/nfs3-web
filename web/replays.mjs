@@ -17,8 +17,10 @@ import { clientIp, foreignOrigin } from './relay.mjs';
 import { TOKEN } from './players.mjs';
 
 export const REPLAY_SIZE = 0x296f8, CONFIG_SIZE = 0x20f0;
-// race settings in the config copy at the start of the file (0x6fd4ac.. - 0x6fbb40, game.c)
-const AT = { track: 0x196c, backward: 0x1980, mirrored: 0x1984, night: 0x1988, weather: 0x198c, laps: 0x1990 };
+// race settings in the config copy at the start of the file (0x6fd4ac.. - 0x6fbb40, game.c):
+// laps is the race's (a knockout round's 4 on Hometown, say), menuLaps the Single Race menu's,
+// which builds before 2026-11-16 17:50 sent with their laps
+const AT = { track: 0x196c, backward: 0x1980, mirrored: 0x1984, night: 0x1988, weather: 0x198c, laps: 0x1974, menuLaps: 0x1990 };
 const FLAG = { backward: 1, mirrored: 2, night: 4, weather: 8 };
 const PER_HOUR = 30;
 const ID = /^[a-z0-9]{8,16}$/;
@@ -29,7 +31,7 @@ export function replayInfo(buf) {
   const u = (k) => buf.readUInt32LE(AT[k]);
   let f = 0;
   for (const k of Object.keys(FLAG)) if (u(k)) f |= FLAG[k];
-  return { track: u('track'), flags: f, laps: u('laps') };
+  return { track: u('track'), flags: f, laps: u('laps'), menuLaps: u('menuLaps') };
 }
 
 export function createReplays(dir, { players, laps }) {
@@ -61,7 +63,7 @@ export function createReplays(dir, { players, laps }) {
       const own = laps.lapsOfRace(race);
       if (!own.length || own.some((r) => !r.p || players.resolve(r.p) !== pl.p)) { send(res, 404, { error: 'no such race' }); return; }
       const r = own[0];
-      if (info.track !== r.track || info.flags !== (r.f & 15) || info.laps !== r.laps) { send(res, 409, { error: 'another race', info }); return; }
+      if (info.track !== r.track || info.flags !== (r.f & 15) || (info.laps !== r.laps && info.menuLaps !== r.laps)) { send(res, 409, { error: 'another race', info }); return; }
       if (have.has(race)) { send(res, 200, { ok: true, had: true }); return; }
       try {
         writeFileSync(file(race) + '.tmp', gzipSync(buf, { level: 9 }));

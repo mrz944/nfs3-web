@@ -73,7 +73,7 @@ export function createLaps(dir, players) {
     const out = {};
     for (const [key, m] of b) out[key] = [...m.values()].sort((x, y) => x.r.ticks - y.r.ticks || x.r.t - y.r.t).slice(0, TOP)
       .map(({ o, r }) => ({ ...(o.startsWith('n:') ? {} : { p: o }), n: o.startsWith('n:') ? r.n : players.nameOf(o) || r.n, car: r.car, ticks: r.ticks, f: r.f, t: r.t,
-        ...(r.race && api.hasReplay(r.race) ? { rp: r.race, lap: r.lap, laps: r.laps } : {}) }));
+        ...(r.race && api.hasReplay(r.race) ? { rp: r.race, lap: r.lap, ...(r.laps >= r.lap ? { laps: r.laps } : {}) } : {}) }));
     json = JSON.stringify({ boards: out });
     return json;
   }
@@ -92,7 +92,9 @@ export function createLaps(dir, players) {
       let m; try { m = JSON.parse(body); } catch { res.writeHead(400).end(); return; }
       const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
       let n = cleanName(m?.n);
-      if (!n || badName(n) || !int(m.track, 0, 63) || !int(m.f, 0, 31) || !int(m.lap, 1, 8) || !int(m.laps, 1, 8) || m.lap > m.laps
+      // laps: the race's laps. Builds before 2026-11-16 17:50 sent the Single Race menu's setting
+      // instead (0 in some modes), so a lap past it is real: a knockout round, say.
+      if (!n || badName(n) || !int(m.track, 0, 63) || !int(m.f, 0, 31) || !int(m.lap, 1, 8) || !int(m.laps, 0, 99)
           || !int(m.ticks, MIN_TICKS, MAX_TICKS) || typeof m.car !== 'string' || !/^[a-z0-9]{1,4}$/.test(m.car)) { res.writeHead(400).end(); return; }
       const send = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(o)); };
       let p = null;

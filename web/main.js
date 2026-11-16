@@ -1446,7 +1446,7 @@ function setupLaps() {
       el('span', { className: 'r', textContent: i + 1 }), el('span', { className: 'n', textContent: r.n }),
       el('span', { className: 'tm', textContent: lapTime(r.ticks) }),
       el('span', { className: 'c', textContent: carName(r.car), title: age(r.t) }, ...LAP_TAGS.filter(([b]) => r.f & b).map(([, t, title]) => el('span', { className: 'ltag', textContent: t, title })),
-        ...(r.rp ? [el('a', { className: 'rpl', href: `__replay/${r.rp}.rp3`, textContent: '▶ replay', title: `The game's replay of ${r.n}'s race: this was lap ${r.lap} of ${r.laps}`, onclick: (e) => takeReplay(e, r) })] : []))))
+        ...(r.rp ? [el('a', { className: 'rpl', href: `__replay/${r.rp}.rp3`, textContent: '▶ replay', title: `The game's replay of ${r.n}'s race: this was lap ${r.lap}${r.laps ? ` of ${r.laps}` : ''}`, onclick: (e) => takeReplay(e, r) })] : []))))
       : [el('li', { className: 'muted', textContent: `No laps on ${trackName(Number(sel.value))} ${dir === 'b' ? 'backward' : 'forward'} yet. Finish one and it shows here.` })]));
     const names = new Set(); for (const b of Object.values(data?.boards || {})) for (const r of b) names.add(r.p || 'n:' + r.n.toLowerCase());
     $('laps-count').textContent = names.size ? `${names.size} racer${names.size === 1 ? '' : 's'}` : 'no laps yet';
@@ -1463,7 +1463,7 @@ function setupLaps() {
       if (!res.ok) throw new Error(res.status);
       const save = await (await (await gameDir()).getDirectoryHandle('fedata')).getDirectoryHandle('save', { create: true });
       await writeFile(save, name + '.rp3', await res.arrayBuffer());
-      note.replaceChildren(`${r.n}'s race is in your game as "${name}": Start Game, then Load › Replays. Their best lap was lap ${r.lap} of ${r.laps}. `,
+      note.replaceChildren(`${r.n}'s race is in your game as "${name}": Start Game, then Load › Replays. Their best lap was lap ${r.lap}${r.laps ? ` of ${r.laps}` : ''}. `,
         el('a', { href: `__replay/${r.rp}.rp3`, download: name + '.rp3', textContent: 'Download the file' }), ' for the PC game (its fedata\\save folder).');
       log(`replay: race ${r.rp} saved to the game as fedata/save/${name}.rp3`);
     } catch (err) { note.textContent = `The replay couldn't be loaded (${err.message}). Try again in a moment.`; }
