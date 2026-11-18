@@ -29,7 +29,11 @@
  * then backward 0x6fd4c0, mirrored 0x6fd4c4, night 0x6fd4c8, weather 0x6fd4cc, and the race's
  * laps at 0x6fd4b4 (the count the game ends the race at, 0x4ce48b; 0x6fd4d0 is only the Single
  * Race menu's setting: 2 in a 4-lap knockout round, 0 in some modes).
- * Each lap the local player finishes goes to the page (Module.onLap), and to the log. */
+ * Each lap the local player finishes goes to the page (Module.onLap), and to the log. Not while
+ * a replay plays (Load > Replays, or Replay after a race): the cars drive their recorded race
+ * again, laps and all. The replay state is at 0x7cda58: 0 recording (1 once its buffer is full),
+ * 2 playing (set where the replay is loaded, 0x4bcb23), 4 played to the end (0x4bd0b8; the game
+ * starts it over, 0x4c53a2); 0 again when a race or replay is over (0x4c48b9). */
 #include "rt.h"
 #include <string.h>
 #include <strings.h>
@@ -88,6 +92,7 @@ uint8_t *game_config_write(const char *path, int64_t pos, const uint8_t *buf, ui
 #define RACE_NIGHT 0x6fd4c8u
 #define RACE_WEATHER 0x6fd4ccu
 #define RACE_LAPS 0x6fd4b4u
+#define REPLAY_STATE 0x7cda58u
 static void lap_report(uint32_t car, int lap, uint32_t ticks) {
     uint32_t code = RD32(car + 0x1e4);
     int track = (int)RD32(RACE_TRACK), laps = (int)RD32(RACE_LAPS);
@@ -114,6 +119,11 @@ static void lap_watch(void) {
     int n = (int)RD32(car + 0x204);
     if (car != seen_car) { seen_car = car; done = n; return; }   /* laps from before: not now */
     if (n < done) done = n;                                  /* a new race, or a restart */
+    uint32_t rs = RD32(REPLAY_STATE);
+    static uint32_t rs_was;
+    if ((rs == 2 || rs == 4) != (rs_was == 2 || rs_was == 4)) rt_log("game: %s", rs == 2 || rs == 4 ? "a replay plays: its laps aren't the player's" : "the replay is over");
+    rs_was = rs;
+    if (rs == 2 || rs == 4) { done = n; return; }            /* a replay: its laps were driven before */
     while (done < n && done < 8) {
         uint32_t ticks = RD32(car + 0x240 + 4u * (uint32_t)done);
         if (!ticks) break;                                   /* written a moment later */
