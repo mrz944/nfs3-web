@@ -351,7 +351,9 @@ async function checkPack() {
       await forgetMods(d);                                             // every file comes again, mods included
       await d.getDirectoryHandle('fedata').then((f) => f.getDirectoryHandle('text')).then((t) => t.removeEntry('text.eng.orig')).catch(() => {});
     } else await writeText(d, '.pack-checked', id);
+    return bad;
   } catch (e) { log('game files check failed:', e.message); }
+  return 0;
 }
 function concat(...parts) {
   const out = new Uint8Array(parts.reduce((s, p) => s + p.length, 0));
@@ -1108,6 +1110,24 @@ async function backToPage() {
   try { if (fsElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch {}
   location.reload();
 }
+// what a stop of the game means for the player, in words they can act on
+function abortText(what) {
+  if (/fetching of the wasm failed|Load failed|Failed to fetch|NetworkError|network error/i.test(what)) return 'The game couldn\'t load: the connection dropped while it was downloading. Reload the page to try again.';
+  if (/is not an object or function|LinkError|CompileError/i.test(what)) return 'This page and the game on the server don\'t match: a new version came out while it loaded. Reload the page.';
+  return 'The game stopped: ' + what;
+}
+// The game stops itself (its own message box, then it quits and the page reloads) when it can't
+// open a file: a game file missing or damaged, or storage too full to save. The reason is kept
+// over the reload (sessionStorage) for init(): it checks the game files again and says what
+// happened, instead of a start page that looks as if nothing did.
+function noteCrash(msg) {
+  if (!/OPEN FAILED/i.test(msg)) return;
+  const file = (/['`]\.?\\?([^'`]+)['`]/.exec(msg)?.[1] || '').replace(/\\/g, '/');
+  try { sessionStorage.setItem('nfs3.crash', JSON.stringify({ msg, file })); } catch {}
+}
+function takeCrash() {
+  try { const c = JSON.parse(sessionStorage.getItem('nfs3.crash') || 'null'); sessionStorage.removeItem('nfs3.crash'); return c; } catch { return null; }
+}
 // the game ended (crash or exit): say so over the game instead of leaving a frozen picture
 let gameDead = false;
 function gameStopped(msg) {
@@ -1155,8 +1175,8 @@ async function start() {
   const mod = await NFS3({
     setStatus: (t) => t && log('[emscripten]', t),
     monitorRunDependencies: (n) => log('[emscripten] pending dependencies:', n),
-    onAbort: (what) => { log('ABORT', what); track('error', { kind: 'abort', msg: String(what) }); gameStopped('The game stopped: ' + what); },
-    onGameMessage: (t) => { log('ERROR game message:', t); track('error', { kind: 'message', msg: t }); },
+    onAbort: (what) => { log('ABORT', what); track('error', { kind: 'abort', msg: String(what) }); gameStopped(abortText(String(what))); },
+    onGameMessage: (t) => { log('ERROR game message:', t); track('error', { kind: 'message', msg: t }); noteCrash(t); },
     onLap: reportLap,                                                // each lap the player finishes (game.c)
     onGameExit: (code) => {
       if (code === 0) { log('game quit: back to the start page'); backToPage(); return; }
@@ -1993,7 +2013,13 @@ async function init() {
   // a server started with --game offers its game folder: import it automatically
   // ?devimport also forces the attempt and reports errors
   const forced = new URLSearchParams(location.search).has('devimport');
-  await checkPack();
+  // the game stopped last time because it couldn't open a file (noteCrash): check the files again
+  const crash = takeCrash();
+  if (crash) {
+    log(`the game stopped last time: ${crash.msg}; checking the game files again`);
+    await gameDir().then((d) => d.removeEntry('.pack-checked')).catch(() => {});
+  }
+  const repaired = (await checkPack()) || 0;
   if (await hasGame()) mark('files');
   const pack = await hasGame() ? null : await packSource();
   if (pack) {
@@ -2017,6 +2043,16 @@ async function init() {
     if (settings.fullscreen && fsSupported() && !fsElement()) toggleFullscreen();   // only allowed inside the click
     start().catch((e) => { console.error(e); status('Failed to start: ' + e.message, true); $('start').disabled = false; }); });
   await refresh();
+  if (crash && gameHere) {
+    let free = Infinity;
+    try { const e = await navigator.storage.estimate(); if (e.quota) free = (e.quota - (e.usage || 0)) / MB; } catch {}
+    const file = crash.file || 'a file';
+    status(free < 100 ? `The game stopped: it couldn't save ${file}, because this browser's storage is full. Free some disk space, then start again.`
+      : repaired ? `The game stopped because some game files were missing or damaged (${file}). They have been downloaded again: start again.`
+      : `The game stopped: it couldn't open ${file}. Start again. If it happens again, choose Remove Game Files and let the page download them once more.`, true);
+    log(`after the stop: ${repaired} damaged file(s) downloaded again, ${Math.round(free)} MB free`);
+    track('error', { kind: 'crash_after', msg: file, repaired, free_mb: Number.isFinite(free) ? Math.round(free) : -1 });
+  }
   // the last race's replay, if it never went with its laps (replay-watch.js)
   if (gameHere) me.ready.then(async () => {
     const dir = await gameDir(), mods = (await moddedPaths(dir).catch(() => new Set(['?']))).size > 0;
