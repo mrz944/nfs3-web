@@ -1804,6 +1804,14 @@ async function init() {
     return;
   }
   if (!navigator.storage?.getDirectory) { status('This browser has no Origin Private File System support.', true); return; }
+  // Firefox private windows (and some privacy settings) refuse the storage the game files go in
+  try { await navigator.storage.getDirectory(); } catch (e) {
+    status(/Firefox/.test(navigator.userAgent)
+      ? 'Firefox private windows can\'t keep the game files (about 400 MB). Open this page in a normal Firefox window.'
+      : 'This browser won\'t let the page keep the game files (about 400 MB): a private window or a privacy setting blocks it. Open this page in a normal window.', true);
+    log('storage: not available:', e.name, e.message); track('error', { kind: 'nostorage', msg: `${e.name}: ${e.message}` });
+    return;
+  }
   if (!(await oneTab())) {
     status('NFS3 is already open in another tab or window. Close that one, then reload this page.', true);
     log('another tab has the game open'); return;
