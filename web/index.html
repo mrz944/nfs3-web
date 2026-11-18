@@ -41,6 +41,8 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   @font-face { font-family: "Silkscreen"; font-weight: 400; font-display: swap; src: url(fonts/silkscreen-latin-400-normal.woff2) format("woff2"); }
   @font-face { font-family: "Silkscreen"; font-weight: 700; font-display: swap; src: url(fonts/silkscreen-latin-700-normal.woff2) format("woff2"); }
   @font-face { font-family: "Russo One"; font-weight: 400; font-display: block; src: url(fonts/russo-one-latin-400-normal.woff2) format("woff2"); }
+  /* country flags (Twemoji, CC-BY 4.0: fonts/LICENSE-twemoji-country-flags.md): Windows has no flag emoji. Loaded only when a flag shows. */
+  @font-face { font-family: "Twemoji Country Flags"; font-display: swap; unicode-range: U+1F1E6-1F1FF; src: url(fonts/twemoji-country-flags.woff2) format("woff2"); }
   :root {
     --night: #000418; --navy: #041250; --deep: #06125a; --blue: #0b2a9e; --royal: #2050e0; --steel: #5a7ee8; --sky: #8cc4ff;
     --gold: #ffd800; --amber: #ff9c00; --rust: #a04800; --ink: #1a0c00;
@@ -207,6 +209,7 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   .ping-good { color: var(--ok); font-weight: bold; } .ping-ok { color: #ffd650; font-weight: bold; } .ping-bad { color: var(--err); font-weight: bold; }
   #rooms-empty { margin-top: 10px; }
   #members { list-style: none; padding: 0; margin: 10px 0; }
+  .flag { font-family: "Twemoji Country Flags", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 1.15em; line-height: 1; margin-right: .35em; vertical-align: -.1em; }
   #members li { display: flex; justify-content: space-between; gap: 8px; padding: 5px 10px; margin-bottom: 4px; font-size: 12px;
     background: linear-gradient(90deg, #4d6dff 0 4px, rgba(40, 70, 190, .4) 4px, rgba(10, 20, 80, .2)); }
   #members li:first-child { background: linear-gradient(90deg, var(--gold) 0 4px, rgba(40, 70, 190, .4) 4px, rgba(10, 20, 80, .2)); }

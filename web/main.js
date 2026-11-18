@@ -1339,6 +1339,16 @@ function showNetBadge() {
 // Room browser and room page. Rooms live on the relay (relay.mjs); we join
 // before Start so everyone sees each other (and WebRTC links come up) early.
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+// a player's country (two letters, from the server: Cloudflare's guess by address) as its flag,
+// the country's name on hover; null when unknown
+const regionName = (() => { try { const d = new Intl.DisplayNames(['en'], { type: 'region' }); return (c) => { try { return d.of(c) || c; } catch { return c; } }; } catch { return (c) => c; } })();
+function flag(cc) {
+  if (!/^[A-Z]{2}$/.test(cc || '')) return null;
+  const name = regionName(cc);
+  return el('span', { className: 'flag', role: 'img', ariaLabel: name, title: name, textContent: String.fromCodePoint(...[...cc].map((ch) => 0x1f1a5 + ch.charCodeAt(0))) });
+}
+// a name with its flag in front
+const flagged = (name, cc, props = {}) => el('span', props, ...[flag(cc), name].filter(Boolean));
 const pingClass = (ms) => (ms < 60 ? 'ping-good' : ms < 130 ? 'ping-ok' : 'ping-bad');
 const savedPass = (code) => { try { return sessionStorage.getItem('nfs3.pass.' + code) || ''; } catch { return ''; } };
 const savePass = (code, pw) => { try { pw ? sessionStorage.setItem('nfs3.pass.' + code, pw) : sessionStorage.removeItem('nfs3.pass.' + code); } catch {} };
@@ -1446,7 +1456,7 @@ function setupOnline() {
       const title = el('div', { className: 'rname', textContent: r.name });
       if (r.locked) title.append(el('span', { className: 'tag', textContent: 'password', title: 'Needs a password' }));
       if (r.racing) title.append(el('span', { className: 'tag race', textContent: 'racing', title: 'Someone in this room is in the game' }));
-      const who = el('div', { className: 'sub', textContent: r.players.map((p) => p.name).join(', ') });
+      const who = el('div', { className: 'sub' }, ...r.players.flatMap((p, i) => [...(i ? [', '] : []), flagged(p.name, p.cc)]));
       const join = el('button', { className: 'small', textContent: full ? 'Full' : 'Join', disabled: full || !!net.id });
       join.onclick = () => joinRoom(r.code, r.locked ? null : '', r.name);
       tb.append(el('tr', {},
@@ -1465,13 +1475,13 @@ function setupOnline() {
     $('room-title').textContent = net.info?.name || net.room;
     if (net.info?.locked) $('room-title').append(el('span', { className: 'tag', textContent: 'password' }));
     const ul = $('members'); ul.textContent = '';
-    ul.append(el('li', {}, el('span', { textContent: `${myName() || 'Player'} (you)` }), el('span', { className: 'muted', textContent: net.relayRtt != null ? `server ${Math.round(net.relayRtt)} ms` : '' })));
+    ul.append(el('li', {}, flagged(`${myName() || 'Player'} (you)`, net.cc), el('span', { className: 'muted', textContent: net.relayRtt != null ? `server ${Math.round(net.relayRtt)} ms` : '' })));
     for (const p of net.peers.values()) {
       const r = net.rttTo(p);
       const right = el('span', {},
         el('span', { className: r != null ? pingClass(r) : 'muted', textContent: r != null ? `${Math.round(r)} ms` : '…' }),
         el('span', { className: 'muted', textContent: ` · ${p.direct ? (p.turn ? 'via TURN' : 'direct') : 'via server'}${p.state === 'game' ? ' · in game' : ''}` }));
-      ul.append(el('li', {}, el('span', { textContent: p.name }), right));
+      ul.append(el('li', {}, flagged(p.name, p.cc), right));
     }
     if (!net.peers.size) ul.append(el('li', {}, el('span', { className: 'muted', textContent: 'Waiting for friends… send them the invite link.' })));
     const best = net.bestHost();
