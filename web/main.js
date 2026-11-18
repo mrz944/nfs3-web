@@ -1064,12 +1064,17 @@ async function startAudio(mod) {
   const lat = () => `${ctx.sampleRate} Hz, latency ${Math.round((ctx.baseLatency || 0) * 1000)}+${Math.round((ctx.outputLatency || 0) * 1000)} ms`;
   log('audio context:', ctx.state, lat(), settings.volume !== 100 ? `(volume ${settings.volume}%)` : '', navigator.audioSession ? `(session ${navigator.audioSession.type})` : '');
   // the sound device changing under the page (headphones, a call taking the device) shows as
-  // other latencies: log it, with the time, to line it up with what players hear
-  let was = lat(), wasMs = ((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000;
-  setInterval(() => {
-    const ms = ((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000;
-    if (Math.abs(ms - wasMs) < 5) return;
-    log(`audio context: now ${lat()} (was ${was})`); was = lat(); wasMs = ms;
+  // other latencies: log it, with the time, to line it up with what players hear. Chrome on
+  // Windows flips between two of them (32 and 40 ms) all the time: one already logged isn't
+  // logged again, and 10 lines at most.
+  const latMs = () => ((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000;
+  const latSeen = [latMs()];
+  const latTimer = setInterval(() => {
+    const ms = latMs();
+    if (latSeen.some((s) => Math.abs(ms - s) < 5)) return;
+    latSeen.push(ms);
+    log(`audio context: now ${lat()} (before: ${latSeen.slice(0, -1).map(Math.round).join(', ')} ms)`);
+    if (latSeen.length > 10) clearInterval(latTimer);
   }, 5000);
   // browsers keep audio suspended until a user gesture, and iOS stops it ("interrupted") for a
   // call, Siri or switching apps: then the next touch, click or key press starts it again.
