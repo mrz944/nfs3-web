@@ -60,7 +60,7 @@ const P = Object.fromEntries(Object.entries({
 }).map(([k, b]) => [k, 1n << BigInt(b)]));
 const bits = (...ks) => String(ks.reduce((a, k) => a | P[k], 0n));
 const MOD_PERMS = bits('KICK', 'BAN', 'AUDIT_LOG', 'MANAGE_MESSAGES', 'NICKNAMES', 'MANAGE_THREADS', 'MODERATE');
-const TYPE = { text: 0, category: 4, announcement: 5, forum: 15 };
+const TYPE = { text: 0, voice: 2, category: 4, announcement: 5, forum: 15 };
 
 // ------------------------------------------------------------------ the server
 let guildId = process.env.DISCORD_GUILD || state.guild;
@@ -114,7 +114,8 @@ async function ensure(c) {
   const type = TYPE[c.kind];
   const parent = c.parent ? chan[c.parent] : null;
   const body = { name: c.name, type, parent_id: parent && !parent.startsWith('new:') ? parent : null, permission_overwrites: overwrites(c) };
-  if (c.kind !== 'category') body.topic = c.topic || '';
+  if (c.kind !== 'category' && c.kind !== 'voice') body.topic = c.topic || '';
+  if (c.kind === 'voice') body.user_limit = c.limit || 0;
   if (c.kind === 'forum') {
     Object.assign(body, { flags: c.requireTag ? 16 : 0, default_sort_order: 0, default_forum_layout: 1, default_reaction_emoji: c.reaction ? { emoji_id: null, emoji_name: c.reaction } : null });
   }
@@ -135,7 +136,8 @@ async function ensure(c) {
   if (have.type !== type) changed.push('type');
   if (have.name !== c.name) changed.push('name');
   if ((have.parent_id || null) !== body.parent_id) changed.push('category');
-  if (c.kind !== 'category' && (have.topic || '') !== body.topic) changed.push('topic');
+  if ('topic' in body && (have.topic || '') !== body.topic) changed.push('topic');
+  if (c.kind === 'voice' && (have.user_limit || 0) !== body.user_limit) changed.push('limit');
   if (!sameOverwrites(have.permission_overwrites || [], body.permission_overwrites)) changed.push('permissions');
   if (c.kind === 'forum') {
     const tags = (l) => JSON.stringify(l.map((t) => [t.name, !!t.moderated, t.emoji_name || null]));

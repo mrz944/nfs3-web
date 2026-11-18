@@ -28,7 +28,8 @@ export const ROLES = [
 const gameTags = GAMES.map((g) => ({ name: g.tag, emoji: g.emoji }));
 const siteList = GAMES.map((g) => `- **${g.name}** (${g.year}): <https://${g.site}>`).join('\n');
 
-// Channels in display order. kind: category | text | announcement | forum.
+// Channels in display order. kind: category | text | announcement | forum | voice (limit: most
+// people in it; voice channels have no topic).
 // readonly: only Developer and Moderator post. staff: only they see it.
 export const CHANNELS = [
   { key: 'info', kind: 'category', name: 'Start here' },
@@ -42,6 +43,13 @@ export const CHANNELS = [
   { key: 'general', kind: 'text', parent: 'community', name: 'general-english', was: ['general'], topic: 'In English: talk about the games, races, old memories. Other languages in #general-international. Bugs go to #bug-reports, ideas to #suggestions.' },
   { key: 'international', kind: 'text', parent: 'community', name: 'general-international', topic: 'Any language: find racers who speak yours. Bugs go to #bug-reports, ideas to #suggestions.' },
   { key: 'help', kind: 'text', parent: 'community', name: 'help', topic: 'Stuck? Say which game, your browser and device, and what you see.' },
+
+  // racing together: find people here, talk while racing in the voice channels (limit: racers per room)
+  { key: 'race', kind: 'category', name: 'Race together', was: ['Voice Channels'] },
+  { key: 'lfr', kind: 'text', parent: 'race', name: 'find-a-race', topic: 'Want to race online? Say which game, which track if you like, and when (with your time zone), and post the invite link of your room from the start page. Then hop into a voice channel. Daily race on nfs3.xyz at 20:00 Polish time.' },
+  { key: 'lobby', kind: 'voice', parent: 'race', name: 'Lobby', was: ['General'] },
+  { key: 'race1', kind: 'voice', parent: 'race', name: 'Race 1', limit: 8 },
+  { key: 'race2', kind: 'voice', parent: 'race', name: 'Race 2', limit: 8 },
 
   { key: 'feedback', kind: 'category', name: 'Feedback' },
   { key: 'bugs', kind: 'forum', parent: 'feedback', name: 'bug-reports', requireTag: true, reaction: '👍',
@@ -94,6 +102,7 @@ ${siteList}
 - {#bug-reports}: something broken? one post per bug
 - {#suggestions}: ideas for the games and the sites
 - {#changelog}: what changed, follow it for updates
+- {#find-a-race}: find racers for an online race, then talk in the voice channels while you race
 - {#general-english}: everything else, in English
 - {#general-international}: everything else, in any language
 - {#welcome}: new members arriving`,
