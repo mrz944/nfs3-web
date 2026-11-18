@@ -1571,7 +1571,7 @@ function reportLap(track, flags, code, lap, laps, ticks) {
     .then(async (r) => {
       const d = await r.json().catch(() => null);
       if (!r.ok) { log(`lap records: not sent (${d?.error === 'taken' ? `${n} is another player's name` : d?.error || r.status})`); return; }
-      if (d?.p) { playerIs(d); race.sent++; }
+      if (d?.p) { playerIs(d); race.sent++; try { localStorage.setItem('nfs3.lapAt', String(Date.now())); } catch {} }
       if (d?.best) log('lap records: a new best lap for', d?.n || n);
     }).catch(() => {});
 }
@@ -2020,7 +2020,8 @@ async function init() {
   // the last race's replay, if it never went with its laps (replay-watch.js)
   if (gameHere) me.ready.then(async () => {
     const dir = await gameDir(), mods = (await moddedPaths(dir).catch(() => new Set(['?']))).size > 0;
-    await sendLateReplay({ dir, key: () => me.k, skip: () => mods, log });
+    const lapAt = () => { try { return Number(localStorage.getItem('nfs3.lapAt')) || 0; } catch { return 0; } };
+    await sendLateReplay({ dir, key: () => me.k, skip: () => mods, lapAt, log });
   }).catch(() => {});
 }
 init();
