@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>/* the game needs https (shared memory, storage): plain http:// links go there first */
+if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname)) location.replace('https://' + location.host + location.pathname + location.search + location.hash);</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NFS3 Hot Pursuit</title>
 <meta name="description" content="Need for Speed III: Hot Pursuit (1998) recompiled to run in your browser. Original handling, tracks and music, no install, online multiplayer with friends.">
@@ -183,6 +185,8 @@
   .namehint a { color: var(--gold); white-space: nowrap; }
   .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; }
   .bar h3 { margin: 0; }
+  #inapp-link { width: 100%; max-width: 360px; margin: 6px 0; font: inherit; color: inherit; background: rgba(0, 0, 0, .4); border: 1px solid #1a2a7c; padding: 4px 6px; }
+  #inapp-open { margin-top: 8px; }
   .card { margin-top: 10px; padding: 10px 12px; clip-path: var(--notch); background: rgba(1, 6, 36, .9); box-shadow: inset 2px 0 0 var(--gold), inset 0 -2px 0 #1a2a7c, inset -2px 0 0 #1a2a7c, inset 0 2px 0 #1a2a7c; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
@@ -445,6 +449,10 @@
     </nav>
 
     <div class="panels" id="setup">
+      <div id="inapp" class="card" hidden><b>Open this page in your browser.</b> The game can't run inside <span id="inapp-app">this app</span>: it needs a full browser such as Chrome or Safari.
+        <span id="inapp-android" hidden><br><button id="inapp-open" class="small">Open in Chrome</button></span>
+        <span id="inapp-ios" hidden><br>Tap <b>⋯</b> (top right), then <b>Open in browser</b> or <b>Open in Safari</b>.</span>
+        <br>Or copy the link and paste it into your browser: <input id="inapp-link" readonly> <button id="inapp-copy" class="small secondary">Copy link</button></div>
       <div id="ios-app" class="card" hidden><b>Fullscreen on iPhone:</b> open Safari's Share menu (on iOS 26 tap ⋯ first), choose <b>Add to Home Screen</b>, then start the game from its new icon. It has its own storage, so the game files download once more there. <button id="ios-app-ok" class="small secondary">Got it</button></div>
       <div id="update" class="card" hidden>A newer version of the game is on the server. <button id="update-reload" class="small">Reload to update</button></div>
       <section class="panel">

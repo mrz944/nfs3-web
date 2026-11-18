@@ -89,6 +89,12 @@ function track(e, d = {}) {
 }
 const pageT0 = Date.now();
 let playStats = { played: false, frames: 0, ms: 0 };
+// "Open in Chrome" from an in-app browser can't carry #room=… (an intent link's # is its own),
+// so it comes as ?room=…: back into the hash before anything reads it
+{
+  const q = new URLSearchParams(location.search), r = q.get('room');
+  if (r && !location.hash) { q.delete('room'); const s = q.toString(); history.replaceState(null, '', location.pathname + (s ? '?' + s : '') + '#room=' + encodeURIComponent(r)); }
+}
 track('view', { w: innerWidth, h: innerHeight, lang: navigator.language, room_link: !!location.hash.match(/room=/) });
 window.addEventListener('pagehide', () => track('end', { secs: (Date.now() - pageT0) / 1000, played: playStats.played, fps: playStats.ms ? playStats.frames * 1000 / playStats.ms : 0 }));
 window.addEventListener('pagehide', () => flushLog(true));
@@ -445,6 +451,42 @@ async function toggleFullscreen() {
 const isIPhone = () => /iPhone|iPod/.test(navigator.userAgent) || new URLSearchParams(location.search).get('iphone') === '1';
 const isWebApp = () => navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
 const wantHomeScreenTip = () => !fsSupported() && isIPhone() && !isWebApp();
+// An app's own browser (Instagram, Facebook, TikTok...), which can't run the game: its name, or ''.
+// '; wv)' is Android's WebView, which other apps use for links.
+function inAppBrowser() {
+  const u = navigator.userAgent;
+  return /Instagram/.test(u) ? 'Instagram' : /FBAN|FBAV|FB_IAB|FBIOS/.test(u) ? 'Facebook' : /BytedanceWebview|musical_ly|TikTok/.test(u) ? 'TikTok'
+    : /\bLine\//.test(u) ? 'LINE' : /; wv\)/.test(u) ? 'app' : '';
+}
+// how to get to a real browser: on Android a button that opens Chrome (an intent link; the room
+// goes as ?room=, see the top), on iPhone where the app keeps "Open in browser"; a link to copy on both
+function showInApp(app) {
+  const u = navigator.userAgent, link = location.href;
+  $('inapp-app').textContent = app === 'app' ? 'this app' : app;
+  $('inapp-link').value = link;
+  $('inapp-android').hidden = !/Android/.test(u);
+  $('inapp-ios').hidden = !/iPhone|iPad|iPod/.test(u);
+  $('inapp-open').addEventListener('click', () => {
+    const to = new URL(location.href), room = roomFromHash();
+    to.hash = '';
+    if (room) to.searchParams.set('room', room);
+    log('in-app browser: opening Chrome');
+    location.href = `intent://${to.host}${to.pathname}${to.search}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(to.href)};end`;
+  });
+  $('inapp-copy').addEventListener('click', async () => {
+    const input = $('inapp-link');
+    input.select();
+    let ok = false;
+    try { await navigator.clipboard.writeText(link); ok = true; } catch {}
+    if (!ok) try { ok = document.execCommand('copy'); } catch {}
+    $('inapp-copy').textContent = ok ? 'Copied' : 'Select and copy it';
+  });
+  // above the menu (on a phone the menu comes first and the card would be a long scroll down)
+  const card = $('inapp'), layout = document.querySelector('.layout');
+  layout.parentNode.insertBefore(card, layout);
+  card.hidden = false;
+  status(`The game can't run in ${app === 'app' ? 'this app' : app}'s own browser: open the page in Chrome or Safari (see above).`, true);
+}
 function showHomeScreenCard() {               // on the start page, until "Got it"
   if (!wantHomeScreenTip()) return;
   const card = $('ios-app');
@@ -1741,6 +1783,13 @@ async function init() {
   if (isWebApp()) log('started from the home screen (web app)');
   log('page loaded; crossOriginIsolated =', crossOriginIsolated, '; SharedArrayBuffer =', typeof SharedArrayBuffer);
   if (!crossOriginIsolated) {
+    // an app's own browser (Instagram, Facebook...) can't run it: say how to get to a real one
+    const app = inAppBrowser();
+    if (app) { showInApp(app); log('in-app browser:', app); track('error', { kind: 'inapp', msg: app }); return; }
+    if (location.protocol === 'http:' && !/^(localhost|127\.)/.test(location.hostname)) {
+      status(`The game needs a secure (https) page: open https://${location.host}${location.pathname}`, true);
+      track('error', { kind: 'browser', msg: 'http' }); return;
+    }
     // the server sends COOP/COEP (serve.mjs); a browser that still isn't isolated is too old or locked down
     status('This browser can\'t run the game: it is too old or a setting or extension blocks what the game needs (SharedArrayBuffer). Try an up-to-date Chrome, Edge, Firefox or Safari.', true);
     track('error', { kind: 'browser', msg: 'not cross-origin isolated' });
