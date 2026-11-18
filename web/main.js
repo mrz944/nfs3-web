@@ -1639,6 +1639,27 @@ function setupLaps() {
 // ---------------------------------------------------------------- activity
 // Start page: who is around (/__live on serve.mjs), the most active racers, the daily race,
 // push notifications, and a note when the server has a newer build than this page.
+// A newer build: a page left open on the start page reloads by itself the next time it's out of
+// sight (or at once if it is), so old pages don't keep old behaviour around. Never in a game, in
+// a room, while downloading, or with a dialog open or something being typed; in a game the page
+// reloads after it anyway (backToPage).
+let newerBuild = null, updateArmed = false;
+function reloadForUpdate() {
+  const safe = () => !gameStarted && !net.id && !['downloading', 'asked'].includes(dl.state)
+    && !document.querySelector('dialog[open]') && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+  const go = () => {
+    if (!document.hidden) return;
+    if (!safe()) return;
+    try {                                                    // once per build, whatever happens
+      if (sessionStorage.getItem('nfs3.updateReload') === newerBuild) return;
+      sessionStorage.setItem('nfs3.updateReload', newerBuild);
+    } catch { return; }
+    log('reloading for the newer build (the page was out of sight)'); flushLog(true);
+    location.reload();
+  };
+  if (!updateArmed) { updateArmed = true; document.addEventListener('visibilitychange', go); }
+  go();
+}
 function setupActivity() {
   let topWin = '7d', last = null;
   const fmtIn = (ms) => { const m = Math.round(ms / 60e3); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
@@ -1659,7 +1680,7 @@ function setupActivity() {
         el('span', { className: until <= 0 ? 'live' : '', textContent: until <= 0 ? 'on now, join a room!' : `starts in ${fmtIn(until)}` }));
     } else $('daily').hidden = true;
     if (d.build && buildInfo?.built && d.build !== buildInfo.built) {
-      if ($('update').hidden) log(`a newer build is on the server (${d.build}, this page has ${buildInfo.built})`);
+      if (newerBuild !== d.build) { newerBuild = d.build; log(`a newer build is on the server (${d.build}, this page has ${buildInfo.built})`); reloadForUpdate(); }
       $('update').hidden = gameStarted;
     }
   }
