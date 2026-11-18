@@ -6,16 +6,16 @@
       ["fixed", "Lap Records: watching a replay in the game counted its laps as yours, so a record replay you downloaded showed up as your own time. Replays don't count now, and the copied times are off the boards."],
       ["fixed", "Lap Records: races driven while waiting in an online room sent no laps, and Instant steering was off in them. They count now, like any race on your own."],
       ["fixed", "Car Showcase, Interior and History in the car menus ran at 1 or 2 frames a second, the car preview at 20 to 30. They run at full speed now."],
-      ["improved", "Phones: the game download keeps the screen on, and when it stops because the screen locked or you switched apps, it carries on by itself once you're back. Before, it waited for a reload."],
+      ["improved", "Phones: the game download keeps the screen on, and when it stops because the screen locked or you switched apps, it carries on by itself once you're back."],
       ["improved", "On mobile data or data saver (Android), the page asks before downloading the 347 MB. On Wi-Fi it still starts by itself."],
-      ["improved", "Instagram's, Facebook's and other apps' own browsers can't run the game. Instead of \"this browser is too old\", they now show how to open the page in Chrome or Safari, and an invite link keeps its room."],
+      ["improved", "Instagram's, Facebook's and other apps' own browsers can't run the game. They now show how to open the page in Chrome or Safari, and an invite link keeps its room."],
       ["improved", "Firefox private windows, incognito windows without room for the game files, and nearly full disks are told so before the download starts, not after it fails."],
       ["fixed", "http://nfs3.xyz links now go to the secure page. Before, the game couldn't run there."],
-      ["fixed", "Windows: the sound broke up for a moment every few seconds on some sound devices. It plays smoothly now."],
-      ["improved", "Fewer short freezes while the game loads tracks, cars and menus, most of all on phones."],
-      ["improved", "Start takes less time from the second start on: your browser keeps the game ready instead of downloading it again."],
-      ["new", "With the game open in another tab, Play here instead moves it to this one. A tab where the game is running keeps it until you choose Exit Game there."],
-      ["improved", "When the game stops because a game file is missing or damaged, the page downloads it again and says what happened. If the storage is full, it says that."]
+      ["fixed", "Windows: on some sound devices the sound broke up every few seconds."],
+      ["improved", "Fewer short freezes while the game loads, most of all on phones."],
+      ["improved", "Start is quicker from the second time on: the browser keeps the game instead of downloading it again."],
+      ["new", "With the game open in another tab, Play here instead moves it here. A tab where it's running keeps it until Exit Game."],
+      ["improved", "When the game stops on a missing or damaged file, the page downloads it again and says so, or that the storage is full."]
     ] },
     { "date": "2026-11-16", "items": [
       ["new", "Your name is yours: change it whenever you like and your lap records go with it. The Lap Records and Most Active Racers show each racer once, with their best. Records from before stay with the name they were driven under, and go to whoever comes back with that name saved."],
