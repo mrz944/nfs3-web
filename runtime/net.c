@@ -278,9 +278,11 @@ static void sync_state_in(const uint8_t src[6], const uint8_t *d, int n) {
     }
     pthread_mutex_unlock(&sync_mu);
 }
-/* which car this player drives: -1 offline, -2 online but not known (yet) */
+/* which car this player drives: -1 offline, -2 online but not known (yet). In a room but not in
+ * an online race (racing alone while waiting for friends): offline, car 0. A client sends its
+ * controls from the race's first frame (sync_out), a host hears them a moment later. */
 int net_local_car(void) {
-    if (!online) return -1;
+    if (!online || !(am_host || am_client)) return -1;
     if (am_host) return 0;
     return my_slot > 0 ? my_slot : -2;
 }
