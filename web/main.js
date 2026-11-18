@@ -1752,6 +1752,35 @@ function oneTab() {
       .catch(() => ok(true));
   });
 }
+// The tab with the game gives it up when another one asks ("Play here instead"), unless it is in
+// a game: then it says so and keeps it. It gives it up by reloading (that lets go of the lock and
+// of any game file it has open); the other tab is already waiting for the lock and gets it first.
+const tabs = typeof BroadcastChannel === 'function' ? new BroadcastChannel('nfs3-tabs') : null;
+function holdTab() {
+  if (!tabs) return;
+  tabs.onmessage = (e) => {
+    if (e.data?.take == null) return;
+    if (gameStarted) { tabs.postMessage({ busy: e.data.take }); log('another tab asked for the game: in a game here, kept it'); return; }
+    log('another tab asked for the game: handing it over'); flushLog(true);
+    location.reload();
+  };
+}
+// this tab hasn't got it: wait until the other one closes or hands it over
+function waitTab() {
+  const me = Math.random().toString(36).slice(2);
+  const got = new Promise((ok) => navigator.locks.request('nfs3-game', () => { ok(); return new Promise(() => {}); }).catch(() => ok()));
+  const b = $('tab-here');
+  if (tabs) {
+    b.hidden = false;
+    b.onclick = () => { b.disabled = true; tabs.postMessage({ take: me }); log('asked the other tab for the game'); };
+    tabs.onmessage = (e) => {
+      if (e.data?.busy !== me) return;
+      b.disabled = false;
+      status('The other tab is in a game. Finish it there and choose Exit Game: this page carries on by itself then.', true);
+    };
+  }
+  return got.then(() => { b.hidden = true; tabs && (tabs.onmessage = null); log('the game is in this tab now'); });
+}
 
 // ------------------------------------------------------------------- what's new
 // The changelog (web/changelog.json: the changes, day by day, written for players; nfs3-webgl's
@@ -1924,9 +1953,12 @@ async function init() {
     return;
   }
   if (!(await oneTab())) {
-    status('NFS3 is already open in another tab or window. Close that one, then reload this page.', true);
-    log('another tab has the game open'); return;
+    status(`NFS3 is already open in another tab or window. Close that one${tabs ? ', or play here instead' : ''}: this page carries on by itself then.`, true);
+    log('another tab has the game open');
+    await waitTab();
+    status('');
   }
+  holdTab();
   try { buildInfo = await (await fetch('dist/build-info.json', { cache: 'no-cache' })).json(); } catch {
     status('No recompiled build found in web/dist. Run ./build-web.sh first.', true); return;
   }
