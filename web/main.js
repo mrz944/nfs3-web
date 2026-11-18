@@ -95,8 +95,13 @@ let playStats = { played: false, frames: 0, ms: 0 };
   const q = new URLSearchParams(location.search), r = q.get('room');
   if (r && !location.hash) { q.delete('room'); const s = q.toString(); history.replaceState(null, '', location.pathname + (s ? '?' + s : '') + '#room=' + encodeURIComponent(r)); }
 }
+// the game download, for the end-of-visit event: how far it got, and what the page told the visitor
+const dl = { state: 'none', got: 0, total: 0, notice: '' };
 track('view', { w: innerWidth, h: innerHeight, lang: navigator.language, room_link: !!location.hash.match(/room=/) });
-window.addEventListener('pagehide', () => track('end', { secs: (Date.now() - pageT0) / 1000, played: playStats.played, fps: playStats.ms ? playStats.frames * 1000 / playStats.ms : 0 }));
+window.addEventListener('pagehide', () => track('end', {
+  secs: (Date.now() - pageT0) / 1000, played: playStats.played, fps: playStats.ms ? playStats.frames * 1000 / playStats.ms : 0,
+  dl: dl.state, dl_pct: dl.total ? Math.floor(dl.got / dl.total * 100) : 0, notice: dl.notice, hidden: document.hidden,
+}));
 window.addEventListener('pagehide', () => flushLog(true));
 // gave up while the game was loading (black screen, too slow): worth knowing, with the phases so far
 window.addEventListener('pagehide', () => { if (phase.click != null && phase.shown == null) track('error', { kind: 'left_loading', msg: Object.entries(phase).map(([k, v]) => `${k}=${v}`).join(' '), secs: (performance.now() - t0) / 1000 }); });
@@ -157,8 +162,23 @@ async function packSource() {
 }
 async function readText(dir, name) { try { return await (await (await dir.getFileHandle(name)).getFile()).text(); } catch { return null; } }
 async function writeText(dir, name, text) { await writeFile(dir, name, text); }
+const MB = 2 ** 20;
+const onPhone = () => matchMedia('(pointer: coarse)').matches;
+// a failed download that is the browser's limits, not the network: said as it is, not retried
+const stopped = (msg, notice) => { dl.state = 'blocked'; dl.notice = notice; const e = new Error(msg); e.blocked = true; return e; };
+// the page is on screen and online (a phone cuts downloads off when the screen locks or the app
+// is switched; they carry on from here)
+const usable = () => new Promise((ok) => {
+  const check = () => {
+    if (document.hidden || !navigator.onLine) return;
+    document.removeEventListener('visibilitychange', check); removeEventListener('online', check); ok();
+  };
+  document.addEventListener('visibilitychange', check); addEventListener('online', check); check();
+});
 async function importPack(base) {
   status('Checking the game download…');
+  // DecompressionStream: Safari 16.4 (iOS 16.4) and newer
+  if (typeof DecompressionStream === 'undefined') throw stopped('This browser is too old to unpack the game download. Update it (on iPhone and iPad: iOS 16.4 or newer), then reload.', 'old');
   const ir = await fetch(base + 'index.json');
   if (!ir.ok) throw new Error(`Game download unavailable (${ir.status}). Reload to retry.`);
   const idx = await ir.json();
@@ -173,6 +193,32 @@ async function importPack(base) {
     await writeText(dir, '.pack-id', idx.id);
   }
   const doneChunks = new Set(((await readText(dir, '.pack-done')) || '').split(',').filter(Boolean));
+  const todo = idx.chunks.filter((c) => !doneChunks.has(c.name));
+  const sizeOf = (cs) => cs.reduce((s, c) => s + c.files.reduce((t, f) => t + f[1], 0), 0);
+  const need = sizeOf(todo), total = sizeOf(idx.chunks), gzLeft = todo.reduce((s, c) => s + c.gz, 0);
+  // room for it? Private and incognito windows get little storage, and a full disk fails late:
+  // say so before downloading anything
+  let est = null;
+  try { est = await navigator.storage.estimate(); } catch {}
+  if (est?.quota) {
+    const free = est.quota - (est.usage || 0);
+    log(`storage: ${(free / MB).toFixed(0)} MB free of ${(est.quota / MB).toFixed(0)} MB, the game needs ${(need / MB).toFixed(0)} MB more`);
+    if (free < need * 1.02) {
+      if (est.quota < total * 1.1) throw stopped(`This browser window doesn't have room for the game files (about ${(total / MB).toFixed(0)} MB): private and incognito windows get very little storage. Open the page in a normal window.`, 'quota_window');
+      throw stopped(`Not enough free disk space for the game files: they need about ${((need - free) / MB + 20).toFixed(0)} MB more. Free some space, then reload.`, 'quota_disk');
+    }
+  }
+  // on mobile data or data saver (Android tells): only on a click
+  const conn = navigator.connection;
+  if (conn && (conn.saveData || conn.type === 'cellular') && gzLeft > 50 * MB) {
+    const how = conn.saveData ? 'data saver' : 'mobile data';
+    dl.state = 'asked'; dl.notice = 'mobile_data';
+    status(`You're on ${how}. The game is a one-time download of ${(gzLeft / MB).toFixed(0)} MB, kept in this browser afterwards. On Wi-Fi it starts by itself.`);
+    const go = $('dl-go'); go.textContent = `Download ${(gzLeft / MB).toFixed(0)} MB`; go.hidden = false;
+    log(`download: waiting for a click (${how}, ${(gzLeft / MB).toFixed(0)} MB)`);
+    await new Promise((ok) => go.addEventListener('click', ok, { once: true }));
+    go.hidden = true; dl.notice = ''; log('download: started by the click');
+  }
   const dirs = new Map([['', dir]]);
   const subdir = async (path) => {
     const parts = path.split('/').slice(0, -1);
@@ -180,60 +226,99 @@ async function importPack(base) {
     for (const p of parts) { key += p + '/'; if (!dirs.has(key)) dirs.set(key, await d.getDirectoryHandle(p, { create: true })); d = dirs.get(key); }
     return d;
   };
-  const MB = 2 ** 20, t0 = performance.now();
-  let got = idx.chunks.filter((c) => doneChunks.has(c.name)).reduce((s, c) => s + c.gz, 0), fresh = 0;
+  const t0 = performance.now();
+  let got = idx.chunks.filter((c) => doneChunks.has(c.name)).reduce((s, c) => s + c.gz, 0), fresh = 0, file = '';
+  Object.assign(dl, { state: 'downloading', got, total: idx.gz });
   $('progress').hidden = false;
+  const rate = () => fresh / Math.max((performance.now() - t0) / 1000, 0.5);
   const show = () => {
+    dl.got = got;
     $('progress').value = got / idx.gz;
-    const secs = (performance.now() - t0) / 1000, rate = fresh / Math.max(secs, 0.5);
-    status(`Downloading the game files… ${(got / MB).toFixed(0)} / ${(idx.gz / MB).toFixed(0)} MB` + (secs > 2 && rate > 0 ? ` · ${(rate / MB).toFixed(1)} MB/s` : ''));
+    const secs = (performance.now() - t0) / 1000;
+    status(`Downloading the game files… ${(got / MB).toFixed(0)} / ${(idx.gz / MB).toFixed(0)} MB` + (secs > 2 && rate() > 0 ? ` · ${(rate() / MB).toFixed(1)} MB/s` : '')
+      + (onPhone() ? ' · Keep this page open: it carries on where it stopped.' : ''));
   };
   if (got) log(`game pack ${idx.id}: resuming, ${doneChunks.size}/${idx.chunks.length} chunks already here`);
-  for (const c of idx.chunks) {
-    if (doneChunks.has(c.name)) continue;
-    let lastErr;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const before = got, beforeFresh = fresh;
-      try {
-        const r = await fetch(base + c.name);
-        if (!r.ok) throw new Error(`${c.name}: HTTP ${r.status}`);
-        const counted = r.body.pipeThrough(new TransformStream({ transform(b, ctl) { got += b.length; fresh += b.length; show(); ctl.enqueue(b); } }));
-        const rd = counted.pipeThrough(new DecompressionStream('gzip')).getReader();
-        let buf = new Uint8Array(0);                          // decoded bytes not yet written
-        const pull = async () => { const { done, value } = await rd.read(); if (done) throw new Error(`${c.name}: ended early`); buf = buf.length ? concat(buf, value) : value; };
-        for (const [path, size] of c.files) {
-          const fh = await (await subdir(path)).getFileHandle(path.split('/').at(-1), { create: true });
-          const isIni = path.toLowerCase() === 'nfs3.ini', ini = [];
-          const w = await openWritable(fh);
-          let left = size;
-          while (left > 0) {
-            if (!buf.length) await pull();
-            const n = Math.min(left, buf.length), part = buf.subarray(0, n);
-            if (isIni) ini.push(part.slice()); else await w.write(exact(part));
-            buf = buf.subarray(n); left -= n;
+  // the screen stays on while it downloads (a locked phone stops it); asked again after the page was away
+  let lock = null;
+  const wake = async () => { if (document.hidden || !navigator.wakeLock) return; try { lock = await navigator.wakeLock.request('screen'); } catch {} };
+  document.addEventListener('visibilitychange', wake); wake();
+  const ticker = setInterval(() => log(`download: ${(got / MB).toFixed(0)}/${(idx.gz / MB).toFixed(0)} MB, ${doneChunks.size}/${idx.chunks.length} chunks, ${(rate() / MB).toFixed(1)} MB/s${document.hidden ? ', page hidden' : ''}`), 10000);
+  const WAITS = [2, 5, 15, 30, 60];                         // seconds before each retry of a chunk
+  try {
+    for (const c of idx.chunks) {
+      if (doneChunks.has(c.name)) continue;
+      let lastErr = null;
+      for (let attempt = 0; ; attempt++) {
+        const before = got, beforeFresh = fresh;
+        let w = null;
+        try {
+          const r = await fetch(base + c.name);
+          if (!r.ok) throw new Error(`${c.name}: HTTP ${r.status}`);
+          const counted = r.body.pipeThrough(new TransformStream({ transform(b, ctl) { got += b.length; fresh += b.length; show(); ctl.enqueue(b); } }));
+          const rd = counted.pipeThrough(new DecompressionStream('gzip')).getReader();
+          let buf = new Uint8Array(0);                          // decoded bytes not yet written
+          const pull = async () => { const { done, value } = await rd.read(); if (done) throw new Error(`${c.name}: ended early`); buf = buf.length ? concat(buf, value) : value; };
+          for (const [path, size] of c.files) {
+            file = path;
+            const fh = await (await subdir(path)).getFileHandle(path.split('/').at(-1), { create: true });
+            const isIni = path.toLowerCase() === 'nfs3.ini', ini = [];
+            w = await openWritable(fh);
+            let left = size;
+            while (left > 0) {
+              if (!buf.length) await pull();
+              const n = Math.min(left, buf.length), part = buf.subarray(0, n);
+              if (isIni) ini.push(part.slice()); else await w.write(exact(part));
+              buf = buf.subarray(n); left -= n;
+            }
+            if (isIni) await w.write(patchIni(new TextDecoder('latin1').decode(concat(...ini))));
+            await w.close(); w = null;
           }
-          if (isIni) await w.write(patchIni(new TextDecoder('latin1').decode(concat(...ini))));
-          await w.close();
+          doneChunks.add(c.name);
+          await writeText(dir, '.pack-done', [...doneChunks].join(','));
+          break;
+        } catch (e) {
+          got = before; fresh = beforeFresh; show();
+          // let go of the half-written file: an open one blocks the next try ("could not be modified")
+          if (w) { try { await (w.abort ? w.abort() : w.close()); } catch {} }
+          const away = document.hidden || !navigator.onLine;
+          log(`game pack: ${c.name} failed (${e.name}: ${e.message}), attempt ${attempt + 1}${away ? ', page hidden or offline' : ''}, in ${file}`);
+          if (/QuotaExceeded/.test(e.name) || attempt >= WAITS.length) { lastErr = e; break; }
+          if (away) {                                            // cut off while away: not counted
+            attempt--;
+            status(`The download paused while this page was in the background. It carries on when the page is back.`);
+          } else {
+            status(`The download stopped (${e.message}). Trying again in ${WAITS[attempt]} s…`);
+            await new Promise((ok) => setTimeout(ok, WAITS[attempt] * 1000));
+          }
+          await usable();
         }
-        doneChunks.add(c.name);
-        await writeText(dir, '.pack-done', [...doneChunks].join(','));
-        lastErr = null; break;
-      } catch (e) {
-        lastErr = e; got = before; fresh = beforeFresh;
-        log(`game pack: ${c.name} failed (${e.message}), attempt ${attempt + 1}`);
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      }
+      if (lastErr) {
+        dl.state = 'failed';
+        const err = lastErr;
+        let free = -1;
+        try { const e2 = await navigator.storage.estimate(); free = ((e2.quota || 0) - (e2.usage || 0)) / MB; } catch {}
+        // storage refusing the files (Safari words it "unknown transient reason (e.g. out of memory)")
+        const full = /QuotaExceeded|UnknownError|NoModificationAllowed|InvalidState/.test(err.name) ? ' The browser would not store the files: free some disk space, leave private browsing, or close other tabs with this page.' : '';
+        const out = new Error(`Download failed: ${err.message}.${full} Reload to continue where it stopped.`);
+        out.info = { name: err.name, chunk: c.name, file, free_mb: Math.round(free), hidden: document.hidden, pct: Math.floor(got / idx.gz * 100) };
+        throw out;
       }
     }
-    if (lastErr) {
-      // storage refusing the files (Safari words it "unknown transient reason (e.g. out of memory)")
-      const full = /QuotaExceeded|UnknownError|NoModificationAllowed|InvalidState/.test(lastErr.name) ? ' The browser would not store the files: free some disk space, leave private browsing, or close other tabs with this page.' : '';
-      throw new Error(`Download failed: ${lastErr.message}.${full} Reload to continue where it stopped.`);
-    }
+  } finally {
+    clearInterval(ticker);
+    document.removeEventListener('visibilitychange', wake);
+    lock?.release().catch(() => {});
   }
   for (const d of idx.dirs || []) await subdir(d + '/');
   log(`game pack ${idx.id}: ${(fresh / MB).toFixed(0)} MB in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   await writeText(dir, '.download-complete', 'complete');
+  dl.state = 'done'; dl.got = idx.gz;
   $('progress').hidden = true;
+  // keep the files: Safari otherwise deletes a site's storage after 7 days without a visit. Not on
+  // Firefox, which asks the visitor about it (and keeps them anyway unless the disk runs full).
+  if (!/Firefox/.test(navigator.userAgent)) navigator.storage.persist?.().then((p) => log('storage: kept for good:', p)).catch(() => {});
 }
 // Safari's FileSystemWritableFileStream.write() writes the whole ArrayBuffer behind a typed array,
 // ignoring a subarray's offset and length, so only ever hand it arrays that cover their buffer.
@@ -1785,14 +1870,14 @@ async function init() {
   if (!crossOriginIsolated) {
     // an app's own browser (Instagram, Facebook...) can't run it: say how to get to a real one
     const app = inAppBrowser();
-    if (app) { showInApp(app); log('in-app browser:', app); track('error', { kind: 'inapp', msg: app }); return; }
+    if (app) { showInApp(app); dl.notice = 'inapp'; log('in-app browser:', app); track('error', { kind: 'inapp', msg: app }); return; }
     if (location.protocol === 'http:' && !/^(localhost|127\.)/.test(location.hostname)) {
       status(`The game needs a secure (https) page: open https://${location.host}${location.pathname}`, true);
-      track('error', { kind: 'browser', msg: 'http' }); return;
+      dl.notice = 'http'; track('error', { kind: 'browser', msg: 'http' }); return;
     }
     // the server sends COOP/COEP (serve.mjs); a browser that still isn't isolated is too old or locked down
     status('This browser can\'t run the game: it is too old or a setting or extension blocks what the game needs (SharedArrayBuffer). Try an up-to-date Chrome, Edge, Firefox or Safari.', true);
-    track('error', { kind: 'browser', msg: 'not cross-origin isolated' });
+    dl.notice = 'not_isolated'; track('error', { kind: 'browser', msg: 'not cross-origin isolated' });
     return;
   }
   // no WebGL2 (hardware acceleration off, GPU blocklisted): the game would run behind a black screen
@@ -1809,7 +1894,7 @@ async function init() {
     status(/Firefox/.test(navigator.userAgent)
       ? 'Firefox private windows can\'t keep the game files (about 400 MB). Open this page in a normal Firefox window.'
       : 'This browser won\'t let the page keep the game files (about 400 MB): a private window or a privacy setting blocks it. Open this page in a normal window.', true);
-    log('storage: not available:', e.name, e.message); track('error', { kind: 'nostorage', msg: `${e.name}: ${e.message}` });
+    dl.notice = 'nostorage'; log('storage: not available:', e.name, e.message); track('error', { kind: 'nostorage', msg: `${e.name}: ${e.message}` });
     return;
   }
   if (!(await oneTab())) {
@@ -1855,7 +1940,12 @@ async function init() {
   const pack = await hasGame() ? null : await packSource();
   if (pack) {
     const d0 = performance.now();
-    try { await importPack(pack); track('import', { from: 'pack', secs: (performance.now() - d0) / 1000 }); } catch (err) { status(err.message, true); $('progress').hidden = true; log('game pack:', err.message); track('error', { kind: 'download', msg: err.message }); return; }
+    try { await importPack(pack); track('import', { from: 'pack', secs: (performance.now() - d0) / 1000 }); } catch (err) {
+      status(err.message, true); $('progress').hidden = true; $('dl-go').hidden = true; log('game pack:', err.message);
+      if (dl.state === 'downloading') dl.state = 'failed';
+      track('error', { kind: err.blocked ? dl.notice : 'download', msg: err.message, ...(err.info || {}) });
+      return;
+    }
     phase.download = Math.round((performance.now() - d0) / 100) / 10; mark('files');
   } else if (!(await hasGame()) && (forced || await serverHasGame())) {
     status('Downloading the game files into this browser…');

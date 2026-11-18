@@ -187,6 +187,7 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   .bar h3 { margin: 0; }
   #inapp-link { width: 100%; max-width: 360px; margin: 6px 0; font: inherit; color: inherit; background: rgba(0, 0, 0, .4); border: 1px solid #1a2a7c; padding: 4px 6px; }
   #inapp-open { margin-top: 8px; }
+  #dl-go { margin: 4px 0 8px; }
   .card { margin-top: 10px; padding: 10px 12px; clip-path: var(--notch); background: rgba(1, 6, 36, .9); box-shadow: inset 2px 0 0 var(--gold), inset 0 -2px 0 #1a2a7c, inset -2px 0 0 #1a2a7c, inset 0 2px 0 #1a2a7c; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   @media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
@@ -459,6 +460,7 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
         <div class="ph"><h2>Status</h2></div>
         <div class="pb">
           <p id="status"></p>
+          <button id="dl-go" class="small" hidden>Download the game</button>
           <progress id="progress" max="1" value="0" hidden></progress>
           <div id="log" hidden></div>
           <p class="logtoggle"><a href="#" id="log-toggle">Show technical log</a></p>
