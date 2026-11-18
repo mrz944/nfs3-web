@@ -34,13 +34,49 @@ extern char g_exe_path[1024];
 static char cwd_guest[260] = "C:\\NFS3";
 static char cwd_rel[260] = "";
 
-static int ci_find(const char *dir, const char *name, char *out, size_t n) {
+/* A name in any case: the folder's listing. Listings are kept, as on the web (OPFS) one is slow:
+ * ~0.1 s for the 200 files of fedata\art\showcase. Some screens ask for missing files every frame
+ * (Car Showcase, Interior, History: SH<car>.qfs of the 5 cars the Modern Patch adds, which have
+ * none), so reading the folder each time made those screens run at 1-2 fps. Only the game changes
+ * its folder while it runs (the page writes before the start), so a listing stays until the game
+ * creates, deletes or renames something (fs_changed). */
+typedef struct { char *dir; char **names; int n; } DirList;   /* n < 0: no such folder */
+static DirList dirs[64];
+static int ndirs, dirs_next;
+static pthread_mutex_t dirs_mu = PTHREAD_MUTEX_INITIALIZER;
+static void dirlist_free(DirList *l) {
+    for (int i = 0; i < l->n; i++) free(l->names[i]);
+    free(l->names); free(l->dir); memset(l, 0, sizeof *l);
+}
+static void fs_changed(void) {
+    pthread_mutex_lock(&dirs_mu);
+    for (int i = 0; i < ndirs; i++) dirlist_free(&dirs[i]);
+    ndirs = dirs_next = 0;
+    pthread_mutex_unlock(&dirs_mu);
+}
+static DirList *dirlist(const char *dir) {               /* dirs_mu held */
+    for (int i = 0; i < ndirs; i++) if (!strcmp(dirs[i].dir, dir)) return &dirs[i];
+    DirList *l;
+    if (ndirs < (int)(sizeof dirs / sizeof *dirs)) l = &dirs[ndirs++];
+    else { l = &dirs[dirs_next]; dirs_next = (dirs_next + 1) % ndirs; dirlist_free(l); }
+    l->dir = strdup(dir); l->n = -1;
     DIR *d = opendir(dir);
-    if (!d) return 0;
-    struct dirent *e; int ok = 0;
-    while ((e = readdir(d)))
-        if (!strcasecmp(e->d_name, name)) { snprintf(out, n, "%s", e->d_name); ok = 1; break; }
+    if (!d) return l;
+    int cap = 0; l->n = 0;
+    for (struct dirent *e; (e = readdir(d)); ) {
+        if (l->n == cap) { cap = cap ? cap * 2 : 32; l->names = realloc(l->names, cap * sizeof *l->names); }
+        l->names[l->n++] = strdup(e->d_name);
+    }
     closedir(d);
+    return l;
+}
+static int ci_find(const char *dir, const char *name, char *out, size_t n) {
+    pthread_mutex_lock(&dirs_mu);
+    DirList *l = dirlist(dir);
+    int ok = 0;
+    for (int i = 0; i < l->n; i++)
+        if (!strcasecmp(l->names[i], name)) { snprintf(out, n, "%s", l->names[i]); ok = 1; break; }
+    pthread_mutex_unlock(&dirs_mu);
     return ok;
 }
 
@@ -124,7 +160,8 @@ static uint32_t k_CreateFileA(CPU *c, const uint32_t *a) {
         disp = 3;   /* OPEN_EXISTING */
     }
     struct stat dst;
-    if (!stat(hp, &dst) && S_ISDIR(dst.st_mode)) { tls_lasterr = 5; return INVALID_HANDLE; }  /* ERROR_ACCESS_DENIED */
+    int existed = !stat(hp, &dst);
+    if (existed && S_ISDIR(dst.st_mode)) { tls_lasterr = 5; return INVALID_HANDLE; }  /* ERROR_ACCESS_DENIED */
     int fl = 0;
     if ((access & 0xC0000000u) == 0xC0000000u) fl = O_RDWR;
     else if (access & 0x40000000u) fl = O_WRONLY;
@@ -141,6 +178,7 @@ static uint32_t k_CreateFileA(CPU *c, const uint32_t *a) {
         if (rt_verbose) rt_log("CreateFileA(%s) -> not found (%s)", gp, hp);
         tls_lasterr = ERROR_FILE_NOT_FOUND; return INVALID_HANDLE;
     }
+    if (!existed && (fl & O_CREAT)) fs_changed();
     File *f = calloc(1, sizeof *f); f->fd = fd; snprintf(f->path, sizeof f->path, "%s", hp);
     uint32_t h = handle_new(H_FILE, f);
     if (rt_verbose > 1) rt_log("CreateFileA(%s) -> %#x", gp, h);
@@ -215,17 +253,17 @@ static uint32_t k_GetFileAttributesA(CPU *c, const uint32_t *a) {
 }
 static uint32_t k_SetFileAttributesA(CPU *c, const uint32_t *a) { (void)c; (void)a; return 1; }
 static uint32_t k_DeleteFileA(CPU *c, const uint32_t *a) {
-    char hp[1024]; fs_map_cwd(HSTR(A(0)), hp, sizeof hp); return unlink(hp) == 0;
+    char hp[1024]; fs_map_cwd(HSTR(A(0)), hp, sizeof hp); int ok = unlink(hp) == 0; if (ok) fs_changed(); return ok;
 }
 static uint32_t k_MoveFileA(CPU *c, const uint32_t *a) {
     char h1[1024], h2[1024]; fs_map_cwd(HSTR(A(0)), h1, sizeof h1); fs_map_cwd(HSTR(A(1)), h2, sizeof h2);
-    return rename(h1, h2) == 0;
+    int ok = rename(h1, h2) == 0; if (ok) fs_changed(); return ok;
 }
 static uint32_t k_CreateDirectoryA(CPU *c, const uint32_t *a) {
-    char hp[1024]; fs_map_cwd(HSTR(A(0)), hp, sizeof hp); return mkdir(hp, 0755) == 0;
+    char hp[1024]; fs_map_cwd(HSTR(A(0)), hp, sizeof hp); int ok = mkdir(hp, 0755) == 0; if (ok) fs_changed(); return ok;
 }
 static uint32_t k_RemoveDirectoryA(CPU *c, const uint32_t *a) {
-    char hp[1024]; fs_map_cwd(HSTR(A(0)), hp, sizeof hp); return rmdir(hp) == 0;
+    char hp[1024]; fs_map_cwd(HSTR(A(0)), hp, sizeof hp); int ok = rmdir(hp) == 0; if (ok) fs_changed(); return ok;
 }
 static uint32_t k_GetCurrentDirectoryA(CPU *c, const uint32_t *a) {
     uint32_t n = (uint32_t)strlen(cwd_guest);
