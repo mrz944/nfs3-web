@@ -1,0 +1,7 @@
+# GitHub's language bar: count the game port (the C runtime, the recompiler, the page that runs
+# the game), not the site's server and community tools around it.
+web/*.mjs linguist-detectable=false
+tools/*.mjs linguist-detectable=false
+tools/discord/** linguist-detectable=false
+docs/** linguist-documentation
+web/words.js linguist-detectable=false
