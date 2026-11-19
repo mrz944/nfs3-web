@@ -1706,7 +1706,7 @@ function setupActivity() {
     if (d.daily) {
       const until = d.daily.next - Date.now();
       $('daily').hidden = false;
-      $('daily').replaceChildren(el('b', { textContent: 'Daily race' }), ` every day at ${new Date(d.daily.next).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · `,
+      $('daily').replaceChildren(el('b', { textContent: 'Daily race' }), ` every day at ${new Date(d.daily.next).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} your time · `,
         el('span', { className: until <= 0 ? 'live' : '', textContent: until <= 0 ? 'on now, join a room!' : `starts in ${fmtIn(until)}` }));
     } else $('daily').hidden = true;
     if (d.build && buildInfo?.built && d.build !== buildInfo.built) {
