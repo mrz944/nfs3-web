@@ -5,6 +5,9 @@
 // build/ next to web/); tests point it at a folder of their own.
 // --daily HH:MM: a daily race at that time (server clock): shown on the start page, with push
 // notifications 10 minutes before and at the start.
+// --staging: a closed test site (staging.nfs3.xyz, tools/staging.sh): a password page in front of
+// everything, the password in <data>/staging-password (made on first start); also noindex and a
+// STAGING ribbon on the page.
 // --funnel publishes the page, WebAssembly build and configured game files publicly.
 // Also serves the online lobby/relay (WebSocket /net, relay.mjs); --relay-tcp adds a
 // raw-TCP endpoint on 127.0.0.1 for native test builds (RT_NET=127.0.0.1:PORT).
@@ -43,6 +46,8 @@ const dailyAt = di >= 0 ? args.splice(di, 2)[1] : '';
 const ri = args.indexOf('--relay-tcp');
 const rawArg = ri >= 0 ? args.splice(ri, 2)[1] : '';
 const rawPort = /^\d+$/.test(rawArg) ? Number(rawArg) : rawArg;   // port or Unix socket path
+const si = args.indexOf('--staging');
+const staging = si >= 0; if (staging) args.splice(si, 1);
 const dai = args.indexOf('--data');
 const dataDir = dai >= 0 ? resolve(args.splice(dai, 2)[1]) : null;
 if (dataDir) data = dataDir;
@@ -115,6 +120,56 @@ function statsAllowed(req, res) {
   res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="NFS3 stats", charset="UTF-8"', 'Cache-Control': 'no-store' }).end('Password required');
   return false;
 }
+
+// --staging: one shared password for testers. The password page gives a cookie (so the
+// WebSocket, the workers and the game download pass too); the cookie is a hash of the password,
+// so changing the password file and restarting logs everyone out.
+const stagingPassword = (() => {
+  if (!staging) return '';
+  const f = join(data, 'staging-password');
+  try { return readFileSync(f, 'utf8').trim(); } catch {}
+  const pw = randomBytes(9).toString('base64url');
+  mkdirSync(dirname(f), { recursive: true });
+  writeFileSync(f, pw + '\n', { mode: 0o600 });
+  return pw;
+})();
+const stagingToken = staging ? createHash('sha256').update('nfs3-staging:' + stagingPassword).digest('base64url') : '';
+function stagingIn(req) {
+  const m = /(?:^|;\s*)nfs3staging=([\w-]+)/.exec(req.headers.cookie || '');
+  return !!m && m[1].length === stagingToken.length && timingSafeEqual(Buffer.from(m[1]), Buffer.from(stagingToken));
+}
+const stagingPage = (wrong) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>NFS3 staging</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#eee;font:16px system-ui,sans-serif}
+form{display:grid;gap:10px;padding:24px;width:min(320px,calc(100vw - 32px));box-sizing:border-box}input,button{font:inherit;padding:10px;border-radius:6px;border:1px solid #555;background:#222;color:#eee}
+button{background:#c90;color:#111;border:0;font-weight:600}p{margin:0;color:#aaa;font-size:14px}.bad{color:#f77}</style>
+<form method="post" action="/__staging"><b>NFS3 staging</b><p>A test site for new features. Ask the owner for the password.</p>
+${wrong ? '<p class="bad">Wrong password.</p>' : ''}<input type="password" name="pw" autocomplete="current-password" autofocus required><button>Enter</button></form>`;
+function stagingGate(req, res, url) {
+  if (url.pathname === '/__staging' && req.method === 'POST') {
+    const ip = clientIp(req), win = Math.floor(Date.now() / 600e3), f = statsFails.get(ip);
+    if (f && f[1] === win && f[0] >= 20) { res.writeHead(429, { 'Retry-After': '600' }).end('Too many attempts'); req.resume(); return false; }
+    let body = ''; req.setEncoding('utf8');
+    req.on('data', (d) => { body += d; if (body.length > 1000) req.destroy(); });
+    req.on('end', () => {
+      const given = new URLSearchParams(body).get('pw') || '';
+      const a = createHash('sha256').update(given).digest(), b = createHash('sha256').update(stagingPassword).digest();
+      if (timingSafeEqual(a, b)) {
+        res.writeHead(303, { Location: '/', 'Set-Cookie': `nfs3staging=${stagingToken}; Path=/; Max-Age=7776000; HttpOnly; Secure; SameSite=Lax`, 'Cache-Control': 'no-store' }).end();
+      } else {
+        if (statsFails.size > 10000) statsFails.clear();
+        statsFails.set(ip, [f && f[1] === win ? f[0] + 1 : 1, win]);
+        res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(stagingPage(true));
+      }
+    });
+    return false;
+  }
+  if (stagingIn(req)) return true;
+  res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(stagingPage(false));
+  req.resume();
+  return false;
+}
+const STAGING_RIBBON = '<div style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99999;background:#c90;color:#111;font:700 11px/1 system-ui,sans-serif;letter-spacing:.1em;padding:4px 10px;border-radius:0 0 6px 6px;pointer-events:none">STAGING</div>';
 
 // room log: every 5 s, each room with 2+ players (names, state, ping to this server),
 // next to the client logs as build/clientlogs/room-<code>.log, for looking into lag later
@@ -254,6 +309,7 @@ const server = createServer((req, res) => {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   let url;
   try { url = new URL(req.url, 'http://x'); } catch { res.writeHead(400).end('bad request'); return; }
+  if (staging) { res.setHeader('X-Robots-Tag', 'noindex, nofollow'); if (!stagingGate(req, res, url)) return; }
   if (req.method === 'POST' && url.pathname === '/__event') {
     if (foreignOrigin(req)) { res.writeHead(403).end(); req.resume(); return; }
     analytics.handleEvent(req, res); return;
@@ -302,12 +358,15 @@ const server = createServer((req, res) => {
     'Cross-Origin-Opener-Policy': 'same-origin',
     'Cross-Origin-Embedder-Policy': 'require-corp',
     'Cross-Origin-Resource-Policy': 'same-origin',
-    'Cache-Control': pinned ? 'public, max-age=31536000, immutable' : 'no-cache',
+    // (staging: private, so Cloudflare's cache never hands a file past the password page)
+    'Cache-Control': pinned ? `${staging ? 'private' : 'public'}, max-age=31536000, immutable` : staging ? 'private, no-cache' : 'no-cache',
     ETag: etag,
   };
   // (Cloudflare makes the ETag weak when it compresses)
   if (String(req.headers['if-none-match'] || '').split(/,\s*/).some((t) => t.replace(/^W\//, '') === etag)) { res.writeHead(304, head).end(); return; }
-  const body = rewrite ? Buffer.from(versioned(readFileSync(file, 'utf8'))) : null;
+  let text = rewrite ? versioned(readFileSync(file, 'utf8')) : null;
+  if (text && staging && path === 'index.html') text = text.replace('</body>', STAGING_RIBBON + '</body>');
+  const body = text != null ? Buffer.from(text) : null;
   res.writeHead(200, {
     'Content-Type': types[extname(file)] || 'application/octet-stream',
     'Content-Length': body ? body.length : st.size,
@@ -320,6 +379,7 @@ const server = createServer((req, res) => {
 // online play: WebSocket lobby/relay at /net (see relay.mjs)
 server.on('upgrade', (req, sock) => {
   let path = ''; try { path = new URL(req.url, 'http://x').pathname; } catch {}
+  if (staging && !stagingIn(req)) { sock.destroy(); return; }
   if (path === '/net') handleUpgrade(req, sock); else sock.destroy();
 });
 // last line of defence: a bug in a request handler is logged, not the end of every race
@@ -329,6 +389,7 @@ if (rawPort) listenRaw(rawPort);
 server.listen(port, '127.0.0.1', () => {
   console.log(`NFS3 web runtime: http://localhost:${port}/` + (gameDir ? `  (game folder: ${gameDir}, automatic download)` : ''));
   console.log(`stats:            http://localhost:${port}/__stats  (password: ${process.env.NFS3_STATS_PASSWORD ? '$NFS3_STATS_PASSWORD' : dataDir ? join(data, 'stats-password') : 'build/stats-password'})`);
+  if (staging) console.log(`staging:          closed with a password (${join(data, 'staging-password')})`);
   if (daily) console.log(`daily race:       ${daily.time} (server time), next ${new Date(daily.next()).toString().slice(0, 21)}; ${push.count} push subscriber(s)`);
   if (funnel && ![443, 8443, 10000].includes(tsPort)) { console.error('Funnel only works on ports 443, 8443 and 10000'); process.exit(1); }
   if (tsPort) startTailscale();

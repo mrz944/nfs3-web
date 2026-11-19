@@ -23,3 +23,8 @@ web/mods/
 id_rsa*
 id_ed25519*
 credentials.json
+
+# staging worktree (tools/staging.sh): links to the main checkout, and the game pack it serves
+/gen
+/game
+web/pack/
