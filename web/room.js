@@ -289,7 +289,23 @@ export function setupRoom(d) {
   $('ready-btn').onclick = () => { const r = !memberOf(net.id).ready; fixCar(); net.setMe({ ready: r }); };
   $('go-now').onclick = () => net.goNow();
   $('hold-cd').onclick = () => net.hold();
-  $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('chat-in').value.trim(); if (v) net.say(v); $('chat-in').value = ''; });
+  // the server takes 1 line a second and drops a repeat within 10 s: such a line stays in the box
+  let sentAt = 0, sentText = '';
+  function sendChat() {
+    const inp = $('chat-in'), v = inp.value.trim();
+    if (!v) return;
+    const now = Date.now();
+    if (now - sentAt < 1100 || (v === sentText && now - sentAt < 10e3)) {
+      const note = $('chat-note');
+      note.textContent = v === sentText ? 'That line was just sent: change it or wait a few seconds.' : 'One line a second: Enter again in a moment.';
+      note.hidden = false; clearTimeout(sendChat.t); sendChat.t = setTimeout(() => { note.hidden = true; }, 2500);
+      return;
+    }
+    $('chat-note').hidden = true;
+    net.say(v); sentAt = now; sentText = v; inp.value = '';
+  }
+  $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
+  $('chat-in').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); } });
 
   net.addEventListener('lobby', () => { if (net.id && !memberOf(net.id).car) fixCar(); draw(); });
   net.addEventListener('status', draw);

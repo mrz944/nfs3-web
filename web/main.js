@@ -2191,7 +2191,8 @@ async function init() {
     gameHere = ok;
     $('pick-label').hidden = ok; $('start').hidden = !ok; $('forget').hidden = !ok;
     (await modsUi)?.refresh();
-    status(ok ? 'Game files are stored in this browser. Ready.' : 'Choose your NFS3 folder (the one with nfs3.exe, fedata and gamedata).');
+    status(ok ? '' : 'Choose your NFS3 folder (the one with nfs3.exe, fedata and gamedata).');   // ready: the Play button says it
+    $('files-line').textContent = ok ? 'The game files are stored in this browser.' : '';
   };
   $('pick').addEventListener('change', async (e) => {
     try { await importFolder(e.target.files); } catch (err) { status(err.message, true); $('progress').hidden = true; return; }
