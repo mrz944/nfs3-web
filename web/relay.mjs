@@ -27,10 +27,12 @@
 //   -> {t:'ping', ts, rtt}                <- {t:'pong', ts}                (rtt = the client's last round trip to us)
 //   -> {t:'info', data}                   <- {t:'info', from, data}        (to the room: ping tables)
 //   -> binary [dst node 6][payload]       <- binary [src node 6][payload]  (dst ff.. = everyone)
+// The room as the race's lobby (race settings, cars, Ready, chat, countdown, host): lobby.mjs.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer as createTcpServer } from 'node:net';
 import { appendFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { addChat, changeMe, changeRace, chatLine, gameState, go, hold, lobbyInit, lobbyState, memberLeft, memberView, raceChanged, recount, roomRace, say, sendPhase, stopTimers } from './lobby.mjs';
 
 const rooms = new Map();         // code -> Room
 const watchers = new Set();      // clients looking at the room browser
@@ -126,6 +128,7 @@ function newRoom(code, { name, password, max, listed } = {}, owner = '', b = '')
     max: Math.min(MAX_ROOM, Math.max(2, Number(max) || MAX_ROOM)),
     salt, pass: pw ? hashPw(salt, pw) : null, members: new Map(), build: b,
   };
+  lobbyInit(room);
   rooms.set(code, room);
   return room;
 }
@@ -138,7 +141,8 @@ function newId(room) {
 const roomInfo = (r) => ({
   code: r.code, name: r.name, host: r.owner, locked: !!r.pass, max: r.max, created: r.created,
   racing: [...r.members.values()].some((c) => c.state === 'game'),
-  players: [...r.members.values()].map((c) => ({ name: c.name, rtt: c.rtt, state: c.state, ...(c.p ? { p: c.p } : {}), ...(c.cc ? { cc: c.cc } : {}) })),
+  players: [...r.members.values()].map((c) => ({ name: c.name, rtt: c.rtt, state: c.state, ready: !!c.ready, ...(c.p ? { p: c.p } : {}), ...(c.cc ? { cc: c.cc } : {}) })),
+  race: roomRace(r),
 });
 
 // room browser updates: soon after any change, and every few seconds for the pings
@@ -191,9 +195,10 @@ class Client {
     this.token = randomBytes(12).toString('hex'); tokens.set(this.token, this);
     const peers = [...room.members.values()].map((c) => ({ id: c.id, name: c.name, state: c.state, cc: c.cc }));
     room.members.set(this.id, this);
-    if (!room.owner) room.owner = this.name;
-    this.json({ t: 'welcome', id: this.id, room: room.code, info: roomInfo(room), peers, token: this.token, cc: this.cc });
-    for (const c of room.members.values()) if (c !== this) c.json({ t: 'join', id: this.id, name: this.name, cc: this.cc });
+    if (!room.ownerId) { room.ownerId = this.id; room.owner = this.name; }
+    this.json({ t: 'welcome', id: this.id, room: room.code, info: roomInfo(room), peers, token: this.token, cc: this.cc, lobby: lobbyState(room) });
+    for (const c of room.members.values()) if (c !== this) c.json({ t: 'join', id: this.id, name: this.name, cc: this.cc, me: memberView(this) });
+    say(room, `${this.name} joined.`);
     console.log(`[relay] ${this.label} joined ${room.code} "${room.name}" as ${this.id} (${this.name}), ${room.members.size}/${room.max}`);
     roomsChanged();
   }
@@ -225,6 +230,7 @@ class Client {
       }
       if (room.build && build(m.build) && room.build !== build(m.build))
         return this.fail('version', 'This room runs another version of the game. Reload the page to update, or ask the room to reload.');
+      if ((room.kicked.get(this.p || this.label) || 0) > Date.now()) return this.fail('kicked', 'You were removed from this room. Try again in a few minutes.');
       if (room.members.size >= room.max) return this.fail('full', 'This room is full.');
       if (room.pass) {
         const given = hashPw(room.salt, clean(m.password, 64));
@@ -252,13 +258,51 @@ class Client {
       if (this.state === 'game' && was !== 'game') this.gameSince = Date.now();
       if (this.state !== 'game' && was === 'game') { logPlay(this.name, (Date.now() - this.gameSince) / 1000, this.p); this.gameSince = 0; }
       for (const c of this.room.members.values()) if (c !== this) c.json({ t: 'state', id: this.id, state: this.state });
+      if (this.state !== was) gameState(this.room);
       roomsChanged();
     } else if (m.t === 'signal' && this.id) {
       const s = JSON.stringify({ t: 'signal', from: this.id, data: m.data });
       if (s.length < 16384) this.room.members.get(String(m.to))?.sendText(s);
     } else if (m.t === 'info' && this.id) {
       const s = JSON.stringify({ t: 'info', from: this.id, data: m.data });
-      if (s.length < 2048) for (const c of this.room.members.values()) if (c !== this) c.sendText(s);
+      if (s.length < 2048) {
+        for (const c of this.room.members.values()) if (c !== this) c.sendText(s);
+        const d = m.data || {}, num = (o) => Object.fromEntries(Object.entries(o && typeof o === 'object' ? o : {}).filter(([, v]) => Number.isFinite(v)).slice(0, 8));
+        this.info = { rtt: num(d.rtt), fps: Number.isFinite(d.fps) ? d.fps : undefined,
+          links: Object.fromEntries(Object.entries(d.links && typeof d.links === 'object' ? d.links : {}).filter(([, v]) => ['direct', 'turn', 'relay'].includes(v)).slice(0, 8)) };
+      }
+    } else if (m.t === 'race' && this.id) {
+      const room = this.room;
+      if (room.ownerId !== this.id || room.phase === 'launch' || room.phase === 'racing') return;
+      const changed = changeRace(room.race, m.race);
+      if (!changed.length) return;
+      for (const c of room.members.values()) c.json({ t: 'race', race: room.race });
+      raceChanged(room, this.name, changed);
+      roomsChanged();
+    } else if (m.t === 'me' && this.id) {
+      const was = !!this.ready, out = changeMe(this, m);
+      if (!Object.keys(out).length) return;
+      for (const c of this.room.members.values()) c.json({ t: 'me', id: this.id, ...memberView(this) });
+      if (!!this.ready !== was) { say(this.room, `${this.name} is ${this.ready ? 'ready' : 'not ready'}.`); recount(this.room, this.ready); roomsChanged(); }
+    } else if (m.t === 'chat' && this.id) {
+      const line = chatLine(this, m.text);
+      if (line) addChat(this.room, line);
+    } else if ((m.t === 'go' || m.t === 'hold') && this.id && this.room.ownerId === this.id) {
+      (m.t === 'go' ? go : hold)(this.room, this.name);
+    } else if (m.t === 'pin' && this.id && this.room.ownerId === this.id) {
+      const id = m.id == null ? null : String(m.id);
+      if (id !== null && !this.room.members.has(id)) return;
+      this.room.pin = id;
+      say(this.room, id ? `${this.room.members.get(id).name} will host.` : 'The site picks the host again.');
+      sendPhase(this.room);
+    } else if (m.t === 'kick' && this.id && this.room.ownerId === this.id) {
+      const c = this.room.members.get(String(m.id));
+      if (!c || c === this) return;
+      this.room.kicked.set(c.p || c.label, Date.now() + 10 * 60e3);
+      if (this.room.kicked.size > 200) this.room.kicked.clear();
+      c.json({ t: 'kicked' });
+      say(this.room, `${this.name} removed ${c.name} from the room.`);
+      c.gone(true);
     } else if (m.t === 'ping') {
       if (Number.isFinite(m.rtt)) this.rtt = Math.round(m.rtt);
       this.json({ t: 'pong', ts: m.ts });
@@ -278,7 +322,7 @@ class Client {
   adopt(old) {
     clearTimeout(old.awayTimer); old.awayTimer = null;
     tokens.delete(old.token);
-    for (const k of ['id', 'room', 'name', 'p', 'rtt', 'state', 'gameSince', 'bin', 'binClient']) this[k] = old[k];
+    for (const k of ['id', 'room', 'name', 'p', 'rtt', 'state', 'gameSince', 'bin', 'binClient', 'car', 'trans', 'color', 'ready', 'dl', 'mods', 'info', 'chatLast', 'chatText', 'chatTimes']) this[k] = old[k];
     this.cc ||= old.cc;
     if (this.binClient) this.binClient.binFor = this;
     this.token = randomBytes(12).toString('hex'); tokens.set(this.token, this);
@@ -287,7 +331,7 @@ class Client {
     Object.assign(old, { id: null, room: null, token: null, bin: null, binClient: null });
     old.close('replaced by a resumed connection');                 // if it was still open
     const peers = [...this.room.members.values()].filter((c) => c !== this).map((c) => ({ id: c.id, name: c.name, state: c.state, cc: c.cc }));
-    this.json({ t: 'welcome', resumed: true, id: this.id, room: this.room.code, info: roomInfo(this.room), peers, token: this.token, cc: this.cc });
+    this.json({ t: 'welcome', resumed: true, id: this.id, room: this.room.code, info: roomInfo(this.room), peers, token: this.token, cc: this.cc, lobby: lobbyState(this.room) });
     console.log(`[relay] ${this.label} resumed ${this.id} (${this.name}) in ${this.room.code} after ${away} ms`);
     logNet({ ev: 'resume', id: this.id, n: this.name, ...(this.p ? { p: this.p } : {}), room: this.room.code, away, state: this.state });
   }
@@ -301,7 +345,7 @@ class Client {
     }, LIMIT.graceMs);
     this.awayTimer.unref?.();
   }
-  gone() {
+  gone(kicked = false) {
     if (!this.id) return;
     clearTimeout(this.awayTimer); this.awayTimer = null;
     if (this.state === 'game' && this.gameSince) logPlay(this.name, (Date.now() - this.gameSince) / 1000, this.p);
@@ -309,8 +353,10 @@ class Client {
     const room = this.room;
     room.members.delete(this.id);
     for (const c of room.members.values()) c.json({ t: 'leave', id: this.id });
-    if (room.owner === this.name) room.owner = room.members.values().next().value?.name || '';
-    if (!room.members.size) rooms.delete(room.code);
+    if (room.members.size) {
+      if (!kicked) say(room, `${this.name} left.`);
+      memberLeft(room, this);
+    } else { stopTimers(room); rooms.delete(room.code); }
     console.log(`[relay] ${this.id} (${this.name}) left ${room.code}`);
     this.id = null; this.room = null;
     roomsChanged();

@@ -110,6 +110,7 @@ window.addEventListener('error', (e) => log('ERROR', e.message, e.filename ? `${
 window.addEventListener('unhandledrejection', (e) => log('ERROR (promise)', e.reason?.stack || e.reason));
 
 import { Net } from './net.js';
+import { setupRoom } from './room.js';
 
 const GAME_DIR = 'nfs3';
 const net = new Net();
@@ -1327,11 +1328,21 @@ function showNetBadge() {
   const b = $('netbadge');
   const draw = () => {
     const s = net.summary();
+    const l = net.lobby?.launch;
+    if (l) {
+      // the room started this race: who creates the game in the game's menus (until the automatic
+      // start, docs/web-lobby-plan.md, does it)
+      const host = l.host === net.id ? null : net.peers.get(l.host)?.name || 'the host';
+      b.textContent = host ? `${host} hosts: in the game, Connect Players › Network IPX, pick ${host}'s game and Join Game`
+        : 'You host: in the game, Connect Players › Network IPX › Create Game, then Start Race when everyone is in';
+      return;
+    }
     b.textContent = `${s.name || 'Room ' + s.room} · ${s.players} player${s.players === 1 ? '' : 's'}` + (s.peers.length ? ' · ' + s.peers.join(' · ') : ' · waiting for friends')
       + (s.best ? ` · best host: ${s.best.name}${s.best.me ? ' (create the game)' : ''}` : '');
   };
   b.hidden = false; draw();
   net.addEventListener('status', draw);
+  net.addEventListener('lobby', draw);
   b.onclick = () => navigator.clipboard?.writeText(roomLink(net.room)).then(() => { b.textContent = 'Room link copied'; setTimeout(draw, 1200); });
 }
 
@@ -1474,21 +1485,24 @@ function setupOnline() {
     if (!inRoom) return;
     $('room-title').textContent = net.info?.name || net.room;
     if (net.info?.locked) $('room-title').append(el('span', { className: 'tag', textContent: 'password' }));
-    const ul = $('members'); ul.textContent = '';
-    ul.append(el('li', {}, flagged(`${myName() || 'Player'} (you)`, net.cc), el('span', { className: 'muted', textContent: net.relayRtt != null ? `server ${Math.round(net.relayRtt)} ms` : '' })));
-    for (const p of net.peers.values()) {
-      const r = net.rttTo(p);
-      const right = el('span', {},
-        el('span', { className: r != null ? pingClass(r) : 'muted', textContent: r != null ? `${Math.round(r)} ms` : '…' }),
-        el('span', { className: 'muted', textContent: ` · ${p.direct ? (p.turn ? 'via TURN' : 'direct') : 'via server'}${p.state === 'game' ? ' · in game' : ''}` }));
-      ul.append(el('li', {}, flagged(p.name, p.cc), right));
-    }
-    if (!net.peers.size) ul.append(el('li', {}, el('span', { className: 'muted', textContent: 'Waiting for friends… send them the invite link.' })));
-    const best = net.bestHost();
-    $('best-host').textContent = best ? `Best host: ${best.me ? 'you' : best.name} (slowest link ${best.worst} ms, counting ping and frame rate). The host has no input lag; everyone else has one round trip to the host.` : '';
     $('share-link').textContent = roomLink(net.room);
+    room.draw();
   }
   const redraw = () => { drawRooms(); drawRoom(); };
+  // the room as the race's lobby: race settings, cars, Ready, countdown, chat (room.js)
+  const room = setupRoom({
+    net, $, el, flagged, pingClass, myName, gameDir, message,
+    gameReady: () => gameHere,
+    modsOn: async () => (await moddedPaths(await gameDir())).size > 0,
+    gameRunning: () => gameStarted,
+  });
+  // the countdown ran out and this player is in the race: start the game (the game's own menus
+  // still connect it, with the badge saying who hosts, until the automatic start is in)
+  net.addEventListener('launch', (e) => {
+    log(`online: the room starts the race, host ${e.detail.host === net.id ? 'me' : net.peers.get(e.detail.host)?.name}`);
+    // (the Ready click earlier counts for the sound; fullscreen needs a click of its own: Alt+Enter)
+    if (!gameStarted && gameHere && !$('start').disabled && !$('start').hidden) $('start').click();
+  });
 
   async function joinRoom(code, password, label) {
     if (needName()) return;

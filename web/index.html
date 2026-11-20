@@ -216,6 +216,61 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   #share { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   #share code { background: #010624; box-shadow: inset 2px 2px 0 #000, inset -2px -2px 0 #34489c; padding: 6px 8px; word-break: break-all; flex: 1 1 240px; color: var(--gold); font: 11px var(--ui); }
   .howto { font-size: 12px; color: #d0daff; }
+  /* the room as the race's lobby (room.js) */
+  #room-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 10px; }
+  #room-grid .card { margin-top: 0; }
+  .rcol { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .race-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 8px; }
+  .race-head b { font: 700 16px/1.2 var(--px); color: var(--gold); text-transform: uppercase; text-shadow: 2px 2px 0 var(--rust); }
+  #race-sub { color: #d0daff; font-size: 12px; }
+  .ropts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+  @media (max-width: 640px) { #room-grid .rcol:last-child { order: -1; } }   /* phones: the players and the chat first */
+  #online .ropts label { font: 11px var(--ui); text-transform: none; color: var(--muted); display: grid; gap: 2px; }
+  #online .ropts select:disabled { opacity: 1; color: #d0daff; cursor: default; box-shadow: inset 0 0 0 1px #1c2a7a; appearance: none; }
+  .assists { margin-top: 8px; font-size: 12px; } .assists summary { cursor: pointer; color: var(--muted); } .assists .ropts { margin-top: 6px; }
+  #race-note { font-size: 11px; margin: 8px 0 0; }
+  #car-card h4 { margin: 0 0 6px; font: 700 16px/1.2 var(--px); color: var(--gold); text-transform: uppercase; }
+  .colors { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: var(--muted); }
+  .swatches { display: flex; gap: 4px; flex-wrap: wrap; }
+  .swatch { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 5px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .35); }
+  button.sw { padding: 3px; background: #010624; box-shadow: inset 0 0 0 2px #2c3c94; min-height: 0; }
+  button.sw .swatch { width: 18px; height: 18px; margin: 0; display: block; }
+  button.sw.on { box-shadow: inset 0 0 0 2px var(--gold); }
+  #members li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; grid-template-areas: "light who st" "light car ping"; align-items: center; gap: 0 8px; }
+  #members li.empty { display: block; }
+  #members .light { grid-area: light; width: 8px; height: 8px; align-self: center; background: #3a4a9a; }
+  #members .m-ready .light { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  #members .m-racing .light { background: var(--gold); }
+  #members .m-dl .light { background: #6a5a20; }
+  #members .who { grid-area: who; color: #fff; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #members .st { grid-area: st; font-size: 11px; color: var(--muted); text-align: right; }
+  #members .m-ready .st { color: var(--ok); } #members .m-racing .st { color: var(--gold); }
+  #members .car { grid-area: car; color: #d0daff; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #members .ping { grid-area: ping; font-size: 11px; text-align: right; white-space: nowrap; }
+  #members .tag { font-size: 11px; padding: 0 3px; }
+  #members li .mmenu { grid-column: 1 / -1; font-size: 11px; } .mmenu summary { cursor: pointer; color: var(--muted); list-style: none; width: max-content; }
+  .mmenu div { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  #chat { display: flex; flex-direction: column; gap: 6px; }
+  #chat-lines { height: 180px; overflow-y: auto; font-size: 12px; overflow-wrap: anywhere; }
+  .cl { padding: 1px 0; } .cl time { color: #6676b8; font-size: 10px; margin-right: 6px; }
+  .cl b { color: var(--sky); cursor: pointer; } .cl.me b { color: var(--gold); cursor: default; }
+  .cl.sys { color: var(--muted); font-style: italic; } .cl.mention { background: rgba(255, 216, 0, .12); }
+  #chat-form { display: flex; gap: 6px; } #chat-form input { flex: 1; min-width: 0; }
+  #ready-bar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; padding: 8px 10px;
+    background: linear-gradient(180deg, #0a1a6e, #040e48); box-shadow: inset 0 2px 0 var(--gold); }
+  #cd-text { flex: 1 1 200px; font: 700 16px/1.2 var(--px); color: #d0daff; text-transform: uppercase; }
+  #cd-text.live { color: var(--gold); }
+  #owner-ctl { display: flex; gap: 6px; }
+  #ready-btn { min-width: 170px; }
+  #ready-btn.on { filter: hue-rotate(80deg); }
+  /* chat over the running game */
+  #chat-ov { position: fixed; left: 8px; top: 8px; z-index: 40; max-width: min(420px, 70vw); pointer-events: none; font: 13px var(--ui); }
+  #chat-ov-lines .cl { background: rgba(0, 4, 24, .65); padding: 2px 6px; margin-bottom: 2px; color: #fff; transition: opacity 1s; width: max-content; max-width: 100%; }
+  #chat-ov-lines .cl.fade { opacity: 0; }
+  #chat-ov form, #chat-ov button { pointer-events: auto; }
+  #chat-ov-in { width: min(360px, 70vw); background: rgba(1, 6, 36, .9); color: #fff; border: 0; padding: 6px 8px; font: 13px var(--ui); box-shadow: inset 0 0 0 2px var(--gold); }
+  #chat-ov-btn { position: fixed; left: 8px; bottom: 8px; padding: 4px 8px; opacity: .7; }
+  #chat-ov-n:not(:empty) { margin-left: 4px; color: var(--gold); }
   .howto b { color: #fff; font-weight: bold; }
 
   /* ---------------------------------------------------------- 1998 extras */
@@ -526,12 +581,38 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
               <h3 id="room-title"></h3>
               <button id="leave-room" class="small secondary">Leave Room</button>
             </div>
-            <ul id="members"></ul>
-            <p id="best-host" class="muted"></p>
+            <div id="room-grid" hidden>
+              <div class="rcol">
+                <div class="card" id="race-card">
+                  <div class="race-head"><b id="race-track"></b><span id="race-sub"></span></div>
+                  <div id="race-opts"></div>
+                  <p id="race-note" class="muted"></p>
+                </div>
+                <div class="card" id="car-card">
+                  <h4>Your car</h4>
+                  <div class="ropts">
+                    <label><span>Car</span><select id="my-car"></select></label>
+                    <label><span>Gearbox</span><select id="my-trans"><option value="auto">Automatic</option><option value="manual">Manual</option></select></label>
+                  </div>
+                  <div class="colors"><span>Colour</span><div id="my-colors" class="swatches"></div><span id="my-colors-none" class="muted">The car's own paint.</span></div>
+                  <p id="car-note" class="muted" hidden>Once the game files are here, the list shows each car's class and colours.</p>
+                </div>
+              </div>
+              <div class="rcol">
+                <ul id="members"></ul>
+                <p id="best-host" class="muted"></p>
+                <div class="card" id="chat">
+                  <div id="chat-lines" aria-live="polite"></div>
+                  <form id="chat-form" autocomplete="off"><input id="chat-in" maxlength="200" placeholder="Say something…" aria-label="Chat message"><button class="small">Send</button></form>
+                </div>
+              </div>
+            </div>
+            <div id="ready-bar" hidden>
+              <span id="cd-text"></span>
+              <span id="owner-ctl" hidden><button id="go-now" class="small secondary" title="Start the countdown's last 3 seconds now">Start now</button><button id="hold-cd" class="small secondary">Wait</button></span>
+              <button id="ready-btn" class="mbtn go">Ready</button>
+            </div>
             <div id="share"><code id="share-link"></code><button id="copy-link" class="small secondary">Copy invite link</button></div>
-            <p class="howto">Everyone clicks <b>Start Game</b>. In the game: <b>Connect Players → Network IPX</b>. One player
-              (ideally the best host) picks <b>Create Game</b>; the others choose the game under <b>Games Available</b>
-              and click <b>Join Game</b>. For two players, <b>Peer-to-Peer</b> gives both players the same responsiveness.</p>
           </section>
         </div>
       </section>

@@ -82,6 +82,7 @@ export class Net extends EventTarget {
     this.worker = null; this.workerOn = false; this.workerRelay = false; this.canTransfer = null;
     this.ice = ICE; this.iceAt = 0; this.turn = false;
     this.player = null;          // () => Promise<{k, s}>: the page's player key (players.mjs), sent with create/hello
+    this.lobby = null;           // the room as the race's lobby (lobby.mjs): race, members' cars and Ready, chat, phase
   }
   // the ICE servers for new links, refreshed now and then (the TURN credentials are short-lived)
   fetchIce() {
@@ -160,6 +161,7 @@ export class Net extends EventTarget {
     clearTimeout(this.resumeTimer);
     const away = Date.now() - this.lostAt;
     this.lostAt = 0; this.token = m.token; this.info = m.info;
+    this.setLobby(m.lobby);
     this.worker?.postMessage({ token: m.token });
     // whoever came or went meanwhile (their messages to us were lost): new ones go through the
     // relay until they call us again, gone ones are dropped
@@ -178,6 +180,7 @@ export class Net extends EventTarget {
     else if (m.t === 'welcome' && m.resumed) this.onResumed(m);
     else if (m.t === 'welcome') {
       this.id = m.id; this.room = m.room; this.info = m.info; this.token = m.token; this.cc = m.cc || '';
+      this.setLobby(m.lobby);
       for (const p of m.peers) this.addPeer(p.id, p.name, true, p.state, p.cc);   // we are the newcomer: we call them
       this.emit('status');
       this.waiting?.resolve(m); this.waiting = null;
@@ -185,8 +188,17 @@ export class Net extends EventTarget {
       clearTimeout(this.resumeTimer); this.lostAt = 0; this.emit('log', 'disconnected from the online server (our place in the room was gone)');
       this.dropRoom(); this.emit('disconnected');
     } else if (m.t === 'error') { const e = new Error(m.error); e.code = m.code; this.waiting?.reject(e); this.waiting = null; }
-    else if (m.t === 'join') { this.addPeer(m.id, m.name, false, 'lobby', m.cc); this.emit('log', `${m.name} joined the room`); this.emit('status'); }
-    else if (m.t === 'leave') { const p = this.peers.get(m.id); if (p) { this.closePeer(m.id); this.emit('log', `${p.name} left`); this.emit('status'); } }
+    else if (m.t === 'join') { if (this.lobby && m.me) this.lobby.members[m.id] = m.me; this.addPeer(m.id, m.name, false, 'lobby', m.cc); this.emit('log', `${m.name} joined the room`); this.emit('status'); }
+    else if (m.t === 'leave') { if (this.lobby) delete this.lobby.members[m.id]; const p = this.peers.get(m.id); if (p) { this.closePeer(m.id); this.emit('log', `${p.name} left`); this.emit('status'); } }
+    else if (m.t === 'race' && this.lobby) { this.lobby.race = m.race; this.emit('lobby'); }
+    else if (m.t === 'me' && this.lobby) { const { t, id, ...me } = m; this.lobby.members[id] = me; this.emit('lobby'); }
+    else if (m.t === 'chat' && this.lobby) { this.lobby.chat.push(m.line); if (this.lobby.chat.length > 50) this.lobby.chat.shift(); this.emit('chat', m.line); }
+    else if (m.t === 'phase' && this.lobby) {
+      const was = this.lobby.launch?.id;
+      const { t, ...ph } = m; Object.assign(this.lobby, ph, { at: performance.now() });
+      this.emit('lobby');
+      if (m.launch && m.launch.id !== was && m.launch.seats.includes(this.id)) this.emit('launch', m.launch);
+    } else if (m.t === 'kicked') { this.emit('log', 'removed from the room by its owner'); this.lostAt = 0; this.dropRoom(); this.emit('kicked'); this.emit('status'); }
     else if (m.t === 'state') { const p = this.peers.get(m.id); if (p) { p.state = m.state; this.emit('status'); } }
     else if (m.t === 'signal') this.onSignal(m.from, m.data);
     else if (m.t === 'pong') { this.relayRtt = performance.now() - m.ts; if (this.id) this.shareRtts(); this.emit('status'); }
@@ -207,10 +219,26 @@ export class Net extends EventTarget {
   create(room, name) { return this.request({ t: 'create', room, name, build: this.build }); }
   join(code, name, password) { return this.request({ t: 'hello', room: code, name, password, mustExist: true, build: this.build }); }
   leave() { this.send({ t: 'leave' }); this.lostAt = 0; this.dropRoom(); this.emit('status'); }
+  // ---- the room as the race's lobby (lobby.mjs)
+  setLobby(l) {
+    if (!l) { this.lobby = null; return; }
+    this.lobby = { ...l, chat: [...(l.chat || [])], members: { ...(l.members || {}) }, at: performance.now() };
+    this.emit('lobby');
+  }
+  get isOwner() { return !!this.lobby && this.lobby.owner === this.id; }
+  // ms until the countdown ends (counted from when the server said so)
+  get countdownLeft() { const l = this.lobby; return !l || l.phase !== 'countdown' ? 0 : l.held ? l.left : Math.max(0, l.left - (performance.now() - l.at)); }
+  setRace(race) { this.send({ t: 'race', race }); }
+  setMe(me) { this.send({ t: 'me', ...me }); }
+  say(text) { this.send({ t: 'chat', text }); }
+  goNow() { this.send({ t: 'go' }); }
+  hold() { this.send({ t: 'hold' }); }
+  pin(id) { this.send({ t: 'pin', id }); }
+  kick(id) { this.send({ t: 'kick', id }); }
   setState(state) { this.state = state; this.send({ t: 'state', state }); }
   dropRoom() {
     for (const id of [...this.peers.keys()]) this.closePeer(id);
-    this.id = null; this.room = null; this.info = null; this.pingTable.clear(); this.queue = [];
+    this.id = null; this.room = null; this.info = null; this.lobby = null; this.pingTable.clear(); this.queue = [];
   }
   closePeer(id) {
     const p = this.peers.get(id); if (!p) return;
@@ -417,10 +445,11 @@ export class Net extends EventTarget {
   }
   shareRtts() {
     const rtt = {};
-    for (const [id, p] of this.peers) { const r = this.rttTo(p); if (r != null) rtt[id] = Math.round(r); }
+    const links = {};
+    for (const [id, p] of this.peers) { const r = this.rttTo(p); if (r != null) rtt[id] = Math.round(r); links[id] = p.direct ? (p.turn ? 'turn' : 'direct') : 'relay'; }
     this.pingTable.set(this.id, rtt);
     if (this.myFps) this.fpsTable.set(this.id, this.myFps);
-    if (this.peers.size) this.send({ t: 'info', data: { rtt, fps: this.myFps || undefined, relay: this.relayRtt != null ? Math.round(this.relayRtt) : undefined } });
+    if (this.peers.size) this.send({ t: 'info', data: { rtt, links, fps: this.myFps || undefined, relay: this.relayRtt != null ? Math.round(this.relayRtt) : undefined } });
     // and to the game, which moves the others' cars ahead by how old their updates are (net.c)
     const mod = this.mod;
     if (mod?._rt_net_peer_rtt) for (const [id, r] of Object.entries(rtt)) {
