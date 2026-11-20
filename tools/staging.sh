@@ -3,8 +3,9 @@
 # with a password. Run from the staging worktree (~/DEV/nfs3-webgl-staging); see
 # docs/web-lobby-plan.md, section 8. Each part is started by hand:
 #
-#   tools/staging.sh setup         once: copies of the live game build, mods and game pack,
-#                                  links to gen/ and game/ (read only), the TURN key
+#   tools/staging.sh setup         once: copies of the live game build and mods, the same game
+#                                  files source (R2), links to gen/ and game/ (read only), the
+#                                  TURN key
 #   tools/staging.sh tunnel-setup  once: the Cloudflare tunnel "nfs3-staging" and the DNS name
 #   tools/staging.sh server        the staging server (Ctrl+C stops it)
 #   tools/staging.sh tunnel        the tunnel to it (Ctrl+C stops it)
@@ -26,15 +27,13 @@ setup)
   # reflink copies (btrfs: no extra space until they change); never links, so a staging build
   # can't write into the live files
   for d in web/dist web/mods; do [ -e "$d" ] || cp -a --reflink=auto "$main/$d" "$d"; done
-  pack=$(sed -n 's|.*/\([0-9a-f]\{16\}\)/.*|\1|p' "$main/web/game-source.json")
-  if [ -n "$pack" ] && [ ! -e "web/pack/$pack" ]; then mkdir -p web/pack; cp -a --reflink=auto "$main/build/r2/$pack" "web/pack/$pack"; fi
-  # the R2 bucket only allows nfs3.xyz, so staging serves the same pack itself
-  printf '{ "url": "pack/%s/" }\n' "$pack" > web/game-source.json
+  # the same game files as nfs3.xyz, from R2 (its CORS rule allows staging.nfs3.xyz: docs/r2.md)
+  cp "$main/web/game-source.json" web/game-source.json
   [ -e gen ] || ln -s "$main/gen" gen
   [ -e game ] || ln -s "$main/game" game
   mkdir -p build/cloudflare
   [ -e build/cloudflare/turn.json ] || { [ -e "$main/build/cloudflare/turn.json" ] && install -m 600 "$main/build/cloudflare/turn.json" build/cloudflare/turn.json; } || true
-  echo "staging ready in $here (game pack $pack)"
+  echo "staging ready in $here (game files: $(cat web/game-source.json))"
   ;;
 tunnel-setup)
   mkdir -p build/cloudflare
