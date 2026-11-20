@@ -1021,7 +1021,7 @@ function watchPads() {
   };
   watchPads.show = show;
   window.addEventListener('gamepadconnected', (e) => { log(`controller connected: ${e.gamepad.id} (${e.gamepad.mapping || 'raw'} mapping, ${e.gamepad.axes.length} axes, ${e.gamepad.buttons.length} buttons)`); show();
-    if (gameStarted && !padsAtStart) { $('hint').textContent = 'Controller connected: reload the page to drive with it (the game looks for controllers at start)'; $('hint').hidden = false; } });
+    if (gameStarted && !padsAtStart) { rememberPad(); $('hint').textContent = 'Controller connected: reload the page to drive with it (the game looks for controllers at start)'; $('hint').hidden = false; } });
   window.addEventListener('gamepaddisconnected', show);
   show();
 }
@@ -1144,10 +1144,37 @@ function gameStopped(msg) {
 const phase = {};
 const mark = (k) => { if (phase[k] == null) phase[k] = Math.round(performance.now() / 100) / 10; };
 
+// The game looks for controllers once, a moment after Start, and the browser only shows one after
+// a button press. A browser that played with a controller before waits for it here (or for "Play
+// without the controller"): a game started without it also saves its settings without the
+// controller's buttons, and the player has to set them up again.
+const PAD_KEY = 'nfs3.pad';
+function waitForPad() {
+  let want = '';
+  try { want = localStorage.getItem(PAD_KEY) || ''; } catch {}
+  if (!want || !settings.pads || padList().length || touchWanted()) return Promise.resolve();
+  const t0 = performance.now();
+  status(`Press any button on your controller (${want}) to drive with it…`);
+  $('pad-skip').hidden = false;
+  return new Promise((done) => {
+    const finish = (why) => {
+      clearInterval(poll); clearTimeout(limit); $('pad-skip').hidden = true;
+      log(`controller: ${why} after ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+      done();
+    };
+    const poll = setInterval(() => { if (padList().length) finish(`${padName(padList()[0])} found`); }, 100);
+    const limit = setTimeout(() => finish('none pressed, starting without'), 20e3);
+    $('pad-skip').onclick = () => { try { localStorage.removeItem(PAD_KEY); } catch {} finish('the player started without it'); };
+  });
+}
+const rememberPad = () => { const p = padList()[0]; if (p) try { localStorage.setItem(PAD_KEY, padName(p)); } catch {} };
+
 async function start() {
   $('start').disabled = true;
   mark('click');
+  await waitForPad();
   padsAtStart = padList().length;
+  if (padsAtStart) rememberPad();
   // phones: the touch controls are the game's controller, unless a real one is connected
   touchPad.on = touchWanted() && !padsAtStart;
   if (touchPad.on && settings.touchSteer === 'tilt') askTilt();      // still inside the Start tap
