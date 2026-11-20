@@ -12,6 +12,9 @@
 //   -> {t:'list'}                         <- {t:'rooms', rooms:[...]} now and on every change (room browser)
 //   -> {t:'create', room:{name, password, max, listed}, name, build}
 //   -> {t:'hello', room, name, password, mustExist, build}
+//   -> {t:'quick', name, build, mods, race}   (Quick Race: the fullest listed room that is waiting
+//                                         and open to us, else a new one with that race; answered
+//                                         like hello)
 //                                         <- {t:'welcome', id, room, info, peers:[{id,name,state}], token} | {t:'error', code, error}
 //      build: the page's game build; a room only takes members of the build it was made with
 //      (different builds desync in a race). Names: see cleanName().
@@ -210,15 +213,31 @@ class Client {
     if (m.t === 'list') {
       watchers.add(this);
       this.json({ t: 'rooms', rooms: [...rooms.values()].filter((r) => r.listed).map(roomInfo) });
-    } else if ((m.t === 'create' || m.t === 'hello') && !this.id && badName(cleanName(m.name))) {
+    } else if ((m.t === 'create' || m.t === 'hello' || m.t === 'quick') && !this.id && badName(cleanName(m.name))) {
       this.fail('name', 'Please pick another name.');
-    } else if ((m.t === 'create' || m.t === 'hello') && !this.id && !this.who(m)) {
+    } else if ((m.t === 'create' || m.t === 'hello' || m.t === 'quick') && !this.id && !this.who(m)) {
       // refused: who() said why
     } else if (m.t === 'create' && !this.id) {
       if (rooms.size >= LIMIT.rooms) return this.fail('busy', 'The server is full right now. Try again in a few minutes.');
       const room = newRoom(newCode(), m.room || {}, cleanName(m.name) || 'Player', build(m.build));
       this.enter(room, m.name);
       if (room.listed) for (const f of onRoom) try { f(roomInfo(room)); } catch {}
+    } else if (m.t === 'quick' && !this.id) {
+      // open to us: listed, no password, same game build, room left, not racing, nobody with the
+      // other Mods setting, and not one we were removed from
+      const b = build(m.build), mods = !!m.mods, now = Date.now();
+      const open = (r) => r.listed && !r.pass && (!r.build || !b || r.build === b) && r.members.size < r.max
+        && (r.phase === 'waiting' || r.phase === 'countdown') && !(r.kicked.get(this.p || this.label) > now)
+        && [...r.members.values()].every((c) => c.mods == null || !!c.mods === mods);
+      const room = [...rooms.values()].filter(open).sort((x, y) => y.members.size - x.members.size || x.created - y.created)[0];
+      this.mods = mods;
+      if (room) { this.enter(room, m.name); return; }
+      if (rooms.size >= LIMIT.rooms) return this.fail('busy', 'The server is full right now. Try again in a few minutes.');
+      const name = cleanName(m.name) || 'Player';
+      const fresh = newRoom(newCode(), { name: `${name}'s race`, listed: true, max: MAX_ROOM }, name, b);
+      changeRace(fresh.race, m.race);
+      this.enter(fresh, m.name);
+      for (const f of onRoom) try { f(roomInfo(fresh)); } catch {}
     } else if (m.t === 'hello' && !this.id) {
       const code = String(m.room || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32);
       if (!code) return this.fail('noroom', 'No room given.');

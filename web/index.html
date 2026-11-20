@@ -240,6 +240,18 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   #rooms { width: 100%; border-collapse: collapse; font-size: 12px; }
   #rooms th { text-align: left; color: var(--gold); font: 700 16px/1 var(--px); text-transform: uppercase; padding: 6px 8px; background: linear-gradient(180deg, #2848c8 0 2px, #14287c 2px); }
   #rooms td { padding: 6px 8px; border-top: 2px solid #0e1a5c; vertical-align: middle; }
+  #rooms .race { color: #d0daff; font-size: 11px; } #rooms .race b { color: #fff; font-size: 12px; }
+  #rooms .ready { color: var(--ok); font-size: 11px; white-space: nowrap; }
+  #rooms .cnt { display: none; }
+  /* phones: no ping or players column (the count goes next to the room's name) */
+  @media (max-width: 560px) { #rooms th:nth-child(3), #rooms td:nth-child(3), #rooms th:nth-child(4), #rooms td:nth-child(4) { display: none; }
+    #rooms td, #rooms th { padding: 6px 5px; } #rooms .cnt { display: inline-block; } }
+  #notify { margin-top: 10px; }
+  .quick { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 12px 0 4px; padding: 12px; clip-path: var(--notch);
+    background: linear-gradient(180deg, rgba(255, 216, 0, .12), rgba(1, 6, 36, .6)); box-shadow: inset 0 2px 0 var(--gold); }
+  .quick .mbtn { flex: 0 0 auto; min-width: 220px; }
+  .quick p { flex: 1 1 220px; margin: 0; font-size: 12px; }
+  .alone { margin-top: 6px; font-size: 12px; } .alone button { margin-top: 6px; }
   #rooms tbody tr:nth-child(odd) { background: rgba(32, 60, 170, .2); }
   #rooms tbody tr:hover { background: rgba(255, 216, 0, .1); }
   #rooms td:last-child { text-align: right; }
@@ -593,7 +605,6 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           <p id="lobby-msg" class="msg" hidden></p>
 
           <div id="activity">
-            <button id="notify" class="small secondary" hidden>🔔 Notify me when people race</button>
             <div id="top" hidden>
               <div class="bar"><h3>Most Active Racers</h3>
                 <div id="top-tabs" class="tabs"><button data-w="24h">24h</button><button data-w="7d" class="on">7 days</button><button data-w="all">All</button></div></div>
@@ -602,9 +613,13 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           </div>
 
           <section id="lobby">
+            <div class="quick">
+              <button id="quick-go" class="mbtn go big">Quick Race</button>
+              <p class="muted">Joins the fullest room that's waiting for players, or makes one for you. Racing with friends? Create a room and send them its link.</p>
+            </div>
             <div class="bar">
-              <h3>Rooms</h3>
-              <button id="show-create" class="small">Create Room</button>
+              <h3>Open Rooms</h3>
+              <button id="show-create" class="small secondary">+ Create Room</button>
             </div>
             <form id="create-form" class="card" hidden autocomplete="off">
               <div class="grid">
@@ -621,11 +636,12 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
             </form>
             <div class="tablewrap">
               <table id="rooms">
-                <thead><tr><th>Room</th><th>Players</th><th title="Estimated round trip through the server; a direct connection is usually faster">Ping</th><th></th></tr></thead>
+                <thead><tr><th>Room</th><th>Race</th><th>Players</th><th title="Estimated round trip through the server; a direct connection is usually faster">Ping</th><th></th></tr></thead>
                 <tbody></tbody>
               </table>
             </div>
-            <p id="rooms-empty" class="muted">No open rooms yet. Create one and invite your friends.</p>
+            <p id="rooms-empty" class="muted">No open rooms right now: Quick Race opens one, and others' Quick Race finds it.</p>
+            <button id="notify" class="small secondary" hidden>🔔 Notify me when people race</button>
           </section>
 
           <section id="inroom" hidden>

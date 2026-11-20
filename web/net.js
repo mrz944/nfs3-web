@@ -218,6 +218,8 @@ export class Net extends EventTarget {
   }
   create(room, name) { return this.request({ t: 'create', room, name, build: this.build }); }
   join(code, name, password) { return this.request({ t: 'hello', room: code, name, password, mustExist: true, build: this.build }); }
+  // Quick Race: the server picks the fullest waiting room we can join, or makes one with this race
+  quick(name, race, mods) { return this.request({ t: 'quick', name, race, mods: !!mods, build: this.build }); }
   leave() { this.send({ t: 'leave' }); this.lostAt = 0; this.dropRoom(); this.emit('status'); }
   // ---- the room as the race's lobby (lobby.mjs)
   setLobby(l) {

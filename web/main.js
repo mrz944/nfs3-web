@@ -1528,13 +1528,21 @@ function setupOnline() {
       const rtts = r.players.map((p) => p.rtt).filter((x) => x != null);
       const ping = net.relayRtt != null && rtts.length ? Math.round(net.relayRtt + rtts.reduce((a, b) => a + b, 0) / rtts.length) : null;
       const title = el('div', { className: 'rname', textContent: r.name });
+      title.append(el('span', { className: 'tag cnt', textContent: `${r.players.length}/${r.max}` }));
       if (r.locked) title.append(el('span', { className: 'tag', textContent: 'password', title: 'Needs a password' }));
       if (r.racing) title.append(el('span', { className: 'tag race', textContent: 'racing', title: 'Someone in this room is in the game' }));
       const who = el('div', { className: 'sub' }, ...r.players.flatMap((p, i) => [...(i ? [', '] : []), flagged(p.name, p.cc)]));
       const join = el('button', { className: 'small', textContent: full ? 'Full' : 'Join', disabled: full || !!net.id });
       join.onclick = () => joinRoom(r.code, r.locked ? null : '', r.name);
+      // the race the room is set up for, and what it's doing (lobby.mjs roomRace)
+      const g = r.race, race = el('td', { className: 'race' });
+      if (g) {
+        race.append(el('b', { textContent: trackName(g.track) }), ` · ${g.laps} laps`,
+          el('br'), [g.dir === 'back' && 'Backward', g.mirror && 'Mirrored', g.night && 'Night', g.weather && 'Weather', g.cls && g.cls !== 'any' && `Class ${g.cls}`].filter(Boolean).join(' · '));
+        if (!r.racing && g.ready) race.append(el('div', { className: 'ready', textContent: `■ ${g.ready} ready${g.phase === 'countdown' ? ', starting soon' : ''}` }));
+      }
       tb.append(el('tr', {},
-        el('td', {}, title, who),
+        el('td', {}, title, who), race,
         el('td', { textContent: `${r.players.length}/${r.max}` }),
         el('td', { className: ping != null ? pingClass(ping) : '', textContent: ping != null ? `${ping} ms` : '–' }),
         el('td', {}, join)));
@@ -1594,6 +1602,23 @@ function setupOnline() {
   $('pass-form').addEventListener('submit', (e) => { e.preventDefault(); if (joining) joinRoom(joining, $('j-pass').value); });
   $('j-cancel').onclick = () => { $('pass-form').hidden = true; joining = null; message(''); };
 
+  // Quick Race (relay.mjs 'quick'): the server picks the fullest room that's waiting for players,
+  // or makes one with this player's last race settings
+  $('quick-go').onclick = async () => {
+    if (needName()) return;
+    message('');
+    $('quick-go').disabled = true;
+    try {
+      let race = null; try { race = JSON.parse(localStorage.getItem('nfs3.race') || 'null'); } catch {}
+      const mods = await (async () => (await moddedPaths(await gameDir())).size > 0)().catch(() => false);   // no game files yet: off
+      const w = await net.quick(myName(), race, mods);
+      track('room_join', { quick: true });
+      history.replaceState(null, '', '#room=' + w.room);
+      log(`online: Quick Race put us in ${w.room} "${w.info?.name}" (${w.peers.length} other player${w.peers.length === 1 ? '' : 's'})`);
+    } catch (e) { message(e.message); }
+    $('quick-go').disabled = false;
+    redraw();
+  };
   $('show-create').onclick = () => {
     if (needName()) return;
     $('create-form').hidden = false; $('pass-form').hidden = true;

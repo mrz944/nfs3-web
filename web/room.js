@@ -120,7 +120,11 @@ export function setupRoom(d) {
       if (s.car) opts = [...s.opts, ...allowed().map((c) => [c, carName(c)])];
       const sel = el('select', { disabled: !own, title: own ? '' : 'The room\'s owner sets up the race' });
       for (const [v, t] of opts) sel.append(el('option', { value: JSON.stringify(v), textContent: t, selected: v === r[s.key] }));
-      sel.onchange = () => net.setRace({ [s.key]: JSON.parse(sel.value) });
+      sel.onchange = () => {
+        const v = JSON.parse(sel.value);
+        net.setRace({ [s.key]: v });
+        try { localStorage.setItem('nfs3.race', JSON.stringify({ ...r, [s.key]: v })); } catch {}   // Quick Race makes rooms with it
+      };
       (s.assist ? assists : main).append(el('label', {}, el('span', { textContent: s.label }), sel));
     }
     box.append(main, el('details', { className: 'assists' }, el('summary', { textContent: 'Driving assists' }), assists));
@@ -183,8 +187,35 @@ export function setupRoom(d) {
     const ul = $('members');
     if (ul.contains(document.activeElement) || ul.querySelector('details[open]')) return;   // an open owner menu stays open
     ul.replaceChildren(...ids().map(memberRow));
-    if (!net.peers.size) ul.append(el('li', { className: 'empty' }, el('span', { className: 'muted', textContent: 'Waiting for friends… send them the invite link.' })));
+    if (!net.peers.size) ul.append(el('li', { className: 'empty' }, aloneNote()));
   }
+  // Waiting alone in a room: others find it with Quick Race or the link. With the page out of
+  // sight, the browser can say when someone comes in.
+  const JOIN_NOTE = 'nfs3.joinNote';
+  const joinNote = () => { try { return localStorage.getItem(JOIN_NOTE) === '1' && Notification.permission === 'granted'; } catch { return false; } };
+  function aloneNote() {
+    const box = el('div', { className: 'alone' }, el('span', { className: 'muted', textContent: 'Waiting for others: anyone who clicks Quick Race comes here, or send a friend the invite link.' }));
+    if ('Notification' in window && Notification.permission !== 'denied') {
+      const on = joinNote();
+      const b = el('button', { type: 'button', className: 'small secondary', textContent: on ? '🔔 You\'ll be told when someone joins (click to stop)' : '🔔 Tell me when someone joins' });
+      b.onclick = async () => {
+        if (joinNote()) { try { localStorage.removeItem(JOIN_NOTE); } catch {} }
+        else if ((await Notification.requestPermission()) === 'granted') { try { localStorage.setItem(JOIN_NOTE, '1'); } catch {} }
+        drawMembers();
+      };
+      box.append(el('br'), b);
+    }
+    return box;
+  }
+  let knownPeers = null;                  // null: not in a room (the players already there when we come in aren't news)
+  net.addEventListener('status', () => {
+    if (!net.id) { knownPeers = null; return; }
+    const now = new Set(net.peers.keys());
+    if (knownPeers && document.hidden && joinNote()) for (const id of now) if (!knownPeers.has(id)) {
+      try { new Notification(`${net.peers.get(id)?.name || 'Someone'} joined your room`, { body: 'Back to the page to race.', tag: 'nfs3-join', icon: 'icons/icon-192.png' }); } catch {}
+    }
+    knownPeers = now;
+  });
   // the host the site would pick now (the server decides at the start, the same way)
   function hostGuess() {
     const l = L(); if (!l) return null;
