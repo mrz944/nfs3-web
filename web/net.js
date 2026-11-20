@@ -176,7 +176,7 @@ export class Net extends EventTarget {
     this.emit('status');
   }
   onMessage(m) {
-    if (m.t === 'rooms') { this.rooms = m.rooms; this.emit('rooms', m.rooms); }
+    if (m.t === 'rooms') { if (typeof m.cc === 'string' && !this.id) this.cc = m.cc; this.rooms = m.rooms; this.emit('rooms', m.rooms); }
     else if (m.t === 'welcome' && m.resumed) this.onResumed(m);
     else if (m.t === 'welcome') {
       this.id = m.id; this.room = m.room; this.info = m.info; this.token = m.token; this.cc = m.cc || '';

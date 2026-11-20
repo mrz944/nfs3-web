@@ -215,12 +215,20 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   .pill { font: 700 16px/1.1 var(--px); color: var(--muted); padding: 1px 8px; background: #020a38; text-transform: uppercase; clip-path: var(--notch); box-shadow: inset 0 0 0 2px #2c3c94; }
   .pill.ok { color: var(--ok); box-shadow: inset 0 0 0 2px #1f6a40; } .pill.ok::before { content: "■ "; }
   .pill.bad { color: var(--err); box-shadow: inset 0 0 0 2px #7a2a24; }
-  #online input, #online select { background: #010624; color: var(--text); border: 0; border-radius: 0; padding: 5px 7px; font: 13px var(--ui); width: 100%;
+  #online input, #online select, #name-dlg input { background: #010624; color: var(--text); border: 0; border-radius: 0; padding: 5px 7px; font: 13px var(--ui); width: 100%;
     box-shadow: inset 2px 2px 0 #000, inset -2px -2px 0 #34489c; }
   #online label { display: block; color: var(--muted); font: 700 16px/1.4 var(--px); text-transform: uppercase; }
   #online .check { display: flex; align-items: center; gap: 8px; align-self: end; padding-bottom: 6px; text-transform: none; font: 12px var(--ui); }
   #online .check input { width: auto; accent-color: var(--gold); }
   .namebox { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #name-dlg label { color: var(--muted); font: 700 16px/1.4 var(--px); text-transform: uppercase; }
+  /* the player's chip in the header: flag, name, edit */
+  header { flex-wrap: wrap; gap: 8px 16px; }
+  .chip { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; text-transform: none; font: 700 13px/1.2 var(--ui); color: #fff;
+    background: linear-gradient(180deg, #0a1a6a, #040e48); box-shadow: inset 0 2px 0 var(--gold), inset 2px 0 0 #1e3494, inset -2px -2px 0 var(--lo); }
+  .chip i { font-style: normal; color: var(--gold); }
+  .chip .flag { margin-right: 0; }
+  @media (max-width: 760px) { .chip { padding: 4px 8px; font-size: 12px; } }
   .namebox input { max-width: 220px; }
   /* the name's state (players.mjs): yours, another player's, ... and the passphrase link */
   .namehint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
@@ -506,6 +514,10 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   /* What's New (setupChangelog in main.js): a dialog over the page */
   #changelog { --cl: var(--gold); padding: 0; border: 0; background: transparent; color: var(--text); width: min(680px, calc(100vw - 32px)); max-width: none; max-height: none; overflow: visible; }
   #changelog::backdrop { background: rgba(0, 2, 12, .74); }
+  #name-dlg { padding: 0; border: 0; background: transparent; color: var(--text); width: min(460px, calc(100vw - 32px)); max-width: none; overflow: visible; }
+  #name-dlg::backdrop { background: rgba(0, 2, 12, .74); }
+  #name-dlg .ph button { padding: 4px 10px; font-size: 13px; }
+  #name-dlg .namebox input { max-width: 220px; }
   #changelog > .panel { display: flex; flex-direction: column; max-height: min(82vh, 780px); max-height: min(82dvh, 780px); }
   #changelog .ph button { padding: 4px 10px; font-size: 13px; }
   #changelog-list { overflow-y: auto; overscroll-behavior: contain; padding: 4px 16px 6px; font: 13px/1.5 var(--ui); }
@@ -544,6 +556,7 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   <header>
     <h1 class="sr">Need for Speed III: Hot Pursuit, web runtime</h1>
     <canvas id="logo" width="360" height="90" aria-hidden="true"></canvas>
+    <button id="me-chip" class="chip" type="button" aria-haspopup="dialog" title="Your name: change it, or race as you on another device"><span id="me-flag"></span><span id="me-name">Player</span><i aria-hidden="true">✎</i></button>
   </header>
 
   <div class="layout">
@@ -597,14 +610,9 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
       </section>
       <section class="screen" data-screen="online" aria-label="Race Online" hidden>
       <section class="panel" id="online">
-        <div class="ph"><h2>Online Play</h2><span id="server-state" class="pill">connecting…</span></div>
+        <div class="ph"><h2>Race Online</h2><span id="server-state" class="pill">connecting…</span></div>
         <div class="pb">
-          <div class="namebox">
-            <label for="pname">Your name</label>
-            <input id="pname" maxlength="10" autocomplete="nickname" placeholder="Player1234" title="Up to 10 letters, digits and . _ - !. Used in the lobby and in the game.">
-            <span class="muted">Racers online:<span class="counter" id="online-count"><i>0</i><i>0</i><i>0</i></span></span>
-          </div>
-          <p id="name-hint" class="namehint" hidden></p>
+          <p class="muted">Racers online:<span class="counter" id="online-count"><i>0</i><i>0</i><i>0</i></span></p>
           <p id="lobby-msg" class="msg" hidden></p>
 
 
@@ -806,10 +814,10 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   </div>
 
   <div class="ticker" aria-hidden="true"><span>
-    <b>NEWS</b> &nbsp;·&nbsp; Online rooms are open: create one, share the link, race &nbsp;·&nbsp;
-    <b>TIP</b> &nbsp;·&nbsp; The best host gets zero input lag, so let the player with the lowest ping create the game &nbsp;·&nbsp;
-    <b>TIP</b> &nbsp;·&nbsp; Two players? Pick Peer-to-Peer in the host dialog &nbsp;·&nbsp;
-    <b>NEWS</b> &nbsp;·&nbsp; Voodoo2 graphics now run on your GPU through WebGL 2 &nbsp;·&nbsp;
+    <b>NEWS</b> &nbsp;·&nbsp; Quick Race finds you a room in one click &nbsp;·&nbsp;
+    <b>TIP</b> &nbsp;·&nbsp; Click Ready in the room: the race starts when two are ready &nbsp;·&nbsp;
+    <b>NEWS</b> &nbsp;·&nbsp; The daily race: every evening, see the time on the Play screen &nbsp;·&nbsp;
+    <b>TIP</b> &nbsp;·&nbsp; Beat a lap record and it's on the boards, with the replay &nbsp;·&nbsp;
   </span></div>
 
   <footer>
@@ -968,6 +976,19 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
     <div class="ph"><h2 id="changelog-title">What's New</h2><button id="changelog-close" type="button" class="secondary">Close</button></div>
     <div id="changelog-list"></div>
     <p class="clfoot">Changes to nfs3.xyz, day by day. Follow every change in <a href="https://discord.gg/sAjTGE7gkw" target="_blank" rel="noopener">#changelog on Discord</a>.</p>
+  </section>
+</dialog>
+<dialog id="name-dlg" aria-labelledby="name-dlg-title">
+  <section class="panel">
+    <div class="ph"><h2 id="name-dlg-title">Your Name</h2><button id="name-dlg-close" type="button" class="secondary">Done</button></div>
+    <div class="pb">
+      <div class="namebox">
+        <label for="pname">Name</label>
+        <input id="pname" maxlength="10" autocomplete="nickname" placeholder="Player1234" title="Up to 10 letters, digits and . _ - !">
+      </div>
+      <p id="name-hint" class="namehint" hidden></p>
+      <p class="muted">What the others see in rooms and in the race, and on the lap records. Up to 10 letters and digits.</p>
+    </div>
   </section>
 </dialog>
 <dialog id="player" aria-labelledby="player-title">

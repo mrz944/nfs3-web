@@ -212,7 +212,7 @@ class Client {
     if (this.binFor && m.t !== 'ping') return;                   // a network worker's socket only carries packets
     if (m.t === 'list') {
       watchers.add(this);
-      this.json({ t: 'rooms', rooms: [...rooms.values()].filter((r) => r.listed).map(roomInfo) });
+      this.json({ t: 'rooms', rooms: [...rooms.values()].filter((r) => r.listed).map(roomInfo), cc: this.cc });   // cc: the visitor's own flag
     } else if ((m.t === 'create' || m.t === 'hello' || m.t === 'quick') && !this.id && badName(cleanName(m.name))) {
       this.fail('name', 'Please pick another name.');
     } else if ((m.t === 'create' || m.t === 'hello' || m.t === 'quick') && !this.id && !this.who(m)) {

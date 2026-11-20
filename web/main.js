@@ -1508,12 +1508,26 @@ function setupOnline() {
   });
   // rooms: the relay gets the key too, and plays us under our player's name
   net.player = () => me.ready.then(() => (me.k ? { k: me.k, s: logSession } : null));
+  // the name lives in its dialog, opened from the chip in the header
+  const nameDlg = $('name-dlg');
+  const openName = () => { if (!nameDlg.open) nameDlg.showModal(); name.focus(); name.select(); };
+  $('me-chip').onclick = openName;
+  $('name-dlg-close').onclick = () => { name.dispatchEvent(new Event('change')); nameDlg.close(); };
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('name-dlg-close').click(); } });
+  const drawChip = () => {
+    $('me-name').textContent = myName() || 'Player';
+    $('me-flag').replaceChildren(...[flag(net.cc)].filter(Boolean));
+  };
+  name.addEventListener('input', drawChip);
+  document.addEventListener('nfs3-player', drawChip);
+  net.addEventListener('status', drawChip); net.addEventListener('rooms', drawChip);
+  drawChip();
   const needName = () => {
     if (myName()) return false;
-    message('Enter your name first.'); name.focus(); return true;
+    message('Enter your name first.'); openName(); return true;
   };
   const message = (t) => { $('lobby-msg').textContent = t || ''; $('lobby-msg').hidden = !t; };
-  const server = (t, cls = '') => { $('server-state').textContent = t; $('server-state').className = 'pill ' + cls; };
+  const server = (t, cls = '') => { $('server-state').textContent = t; $('server-state').className = 'pill ' + cls; $('quick-go').disabled = cls !== 'ok'; $('quick-go').title = cls === 'ok' ? '' : 'Connecting to the online server…'; };
   let joining = null;          // room code waiting for a password
 
   // ---- room list
@@ -1786,7 +1800,7 @@ function setupLaps() {
       if (!res.ok) throw new Error(res.status);
       const save = await (await (await gameDir()).getDirectoryHandle('fedata')).getDirectoryHandle('save', { create: true });
       await writeFile(save, name + '.rp3', await res.arrayBuffer());
-      note.replaceChildren(`${r.n}'s race is in your game as "${name}": Start Game, then Load › Replays. Their best lap was lap ${r.lap}${r.laps ? ` of ${r.laps}` : ''}. `,
+      note.replaceChildren(`${r.n}'s race is in your game as "${name}": Play, then Load › Replays. Their best lap was lap ${r.lap}${r.laps ? ` of ${r.laps}` : ''}. `,
         el('a', { href: `__replay/${r.rp}.rp3`, download: name + '.rp3', textContent: 'Download the file' }), ' for the PC game (its fedata\\save folder).');
       log(`replay: race ${r.rp} saved to the game as fedata/save/${name}.rp3`);
     } catch (err) { note.textContent = `The replay couldn't be loaded (${err.message}). Try again in a moment.`; }
@@ -1901,7 +1915,7 @@ const TIPS = [
   'Hold the handbrake through tight corners to slide around them.',
   'In Hot Pursuit, the police set up roadblocks and spike strips ahead. Watch the radar.',
   'Manual transmission is faster once you get the hang of it.',
-  'Online: whoever has the lowest ping should create the game. The host never lags.',
+  'Online: Quick Race puts you in the fullest room that is waiting for players.',
   'Two racers? Pick Peer-to-Peer in the host dialog so both get the same responsiveness.',
   'Click the picture to capture the mouse. Esc gives it back.',
   'Car Showcase has history, interiors and a slide show for every car.',
