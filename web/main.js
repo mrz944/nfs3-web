@@ -1707,7 +1707,18 @@ function reportLap(track, flags, code, lap, laps, ticks) {
       if (d?.best) log('lap records: a new best lap for', d?.n || n);
     }).catch(() => {});
 }
+// Lap Records' two tabs: the boards and the most active racers
+function setupRecordTabs() {
+  const tabs = $('rec-tabs'); if (!tabs) return;
+  const pick = (t) => {
+    for (const b of tabs.children) { const on = b.dataset.t === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
+    $('rec-laps').hidden = t !== 'laps'; $('rec-active').hidden = t !== 'active';
+  };
+  tabs.onclick = (e) => { const t = e.target.closest('button')?.dataset.t; if (t) pick(t); };
+  pick('laps');
+}
 function setupLaps() {
+  setupRecordTabs();
   const sel = $('laps-track');
   let data = null, dir = 'f', want = '2';
   try { want = localStorage.getItem('nfs3.lapsTrack') || want; dir = localStorage.getItem('nfs3.lapsDir') === 'b' ? 'b' : 'f'; } catch {}
@@ -1829,7 +1840,7 @@ function setupActivity() {
     $('live-line').classList.toggle('on', d.racing + d.lobby > 0);
     $('live-names').replaceChildren(...d.names.map((p) => el('span', { className: 'ntag' + (p.racing ? ' racing' : ''), textContent: p.n, title: p.racing ? 'racing' : 'in the lobby' })));
     const rows = d.top?.[topWin] || [];
-    $('top').hidden = !['24h', '7d', 'all'].some((k) => d.top?.[k]?.length);
+    $('top').hidden = false;                      // its own tab on Lap Records: an empty list says so
     $('top-list').replaceChildren(...(rows.length ? rows.map((r, i) => el('li', {}, el('span', { className: 'r', textContent: i + 1 }), el('span', { className: 'n', textContent: r.n }), el('span', { className: 'f', textContent: r.min >= 60 ? `${Math.floor(r.min / 60)} h ${r.min % 60} min` : `${r.min} min` })))
       : [el('li', { className: 'muted', textContent: 'No races in this time yet.' })]));
     if (d.daily) {

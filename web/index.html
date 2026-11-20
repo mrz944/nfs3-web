@@ -463,6 +463,17 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   #top { margin-top: 8px; } .tabs { display: flex; gap: 4px; }
   .tabs button { font-size: 16px; padding: 2px 8px; background: #0b1656; color: var(--muted); box-shadow: inset 0 0 0 2px #24348a; clip-path: none; text-shadow: none; }
   .tabs button.on { background: var(--gold); color: var(--ink); box-shadow: none; }
+  .tabs.big { display: flex; gap: 4px; margin-bottom: 12px; } .tabs.big button { flex: 1 1 0; padding: 6px 8px; }
+  #rec-active .bar { margin-top: 0; }
+  .lapnote summary, .moreopts summary, .modinfo summary { cursor: pointer; }
+  .lapnote { margin-top: 10px; font-size: 11px; } .lapnote[open] summary { margin-bottom: 4px; }
+  .moreopts { margin-top: 12px; } .moreopts > summary { color: var(--gold); font: 700 16px/1.3 var(--px); text-transform: uppercase; }
+  .modinfo { margin: 4px 0 0; font-size: 11px; color: var(--muted); }
+  .home .hint { margin: 0 0 6px; color: var(--muted); font-size: 12px; } .home .hint:empty { display: none; }
+  .about-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 14px; align-items: start; }
+  .about-links .more, .about-links .maker { margin-top: 0; }
+  #loading .ltip { max-width: 420px; margin: 18px auto 0; font: 12px/1.5 var(--ui); color: #c8d4ff; }
+  #loading .ltip:not(:empty)::before { content: "Tip: "; color: var(--gold); font-weight: bold; }
   #top-list { list-style: none; margin: 4px 0 0; padding: 0; font-size: 12px; }
   #top-list li { display: grid; grid-template-columns: 1.8em 1fr auto; gap: 6px; padding: 2px 4px; border-top: 2px solid #0e1a5c; }
   #top-list .r { color: var(--muted); text-align: right; font-family: var(--px); } #top-list li:nth-child(1) .r { color: var(--gold); } #top-list .f { color: var(--ok); }
@@ -544,16 +555,7 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
       <a class="mbtn" href="#about" data-go="about"><i class="ico" aria-hidden="true">?</i><span class="l">About</span><span class="s">More</span></a>
       <a class="mbtn" id="changelog-open" href="#changelog">What's New… <i class="clnew">new</i></a>
       <div class="sep"></div>
-      <div class="hint" id="pad"></div>
       <a class="discord" href="https://discord.gg/sAjTGE7gkw" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg><span><b>Join our Discord</b>Help, bug reports, ideas, races</span></a>
-      <div class="more"><b>More races</b>
-        <a href="https://nfs2se.xyz/" target="_blank" rel="noopener"><span>nfs2se.xyz ›</span>Need for Speed II: Special Edition</a>
-        <a href="https://nfs4.xyz/" target="_blank" rel="noopener"><span>nfs4.xyz ›</span>Need for Speed: High Stakes</a></div>
-      <div class="tip"><b>Tip of the day</b><span id="tip">Hold the handbrake through tight corners to slide around them.</span></div>
-      <div class="maker"><b>Created by</b>
-        <a href="https://github.com/mrz944" target="_blank" rel="noopener">Marcin Zadka</a><br>
-        Source on <a href="https://github.com/mrz944/nfs3-web" target="_blank" rel="noopener">GitHub ›</a></div>
-      <div class="hint">Game files download automatically and are cached in this browser.</div>
     </nav>
 
     <div class="panels" id="setup">
@@ -573,6 +575,7 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
             <button id="play-wait" class="mbtn go big" disabled title="Once the game files are here">Play</button>
             <a class="mbtn big" href="#online" id="go-online">Race Online</a>
           </div>
+          <p class="hint" id="pad"></p>
           <p id="status"></p>
           <button id="dl-go" class="small" hidden>Download the game</button>
           <button id="tab-here" class="small" hidden>Play here instead</button>
@@ -604,13 +607,6 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           <p id="name-hint" class="namehint" hidden></p>
           <p id="lobby-msg" class="msg" hidden></p>
 
-          <div id="activity">
-            <div id="top" hidden>
-              <div class="bar"><h3>Most Active Racers</h3>
-                <div id="top-tabs" class="tabs"><button data-w="24h">24h</button><button data-w="7d" class="on">7 days</button><button data-w="all">All</button></div></div>
-              <ol id="top-list"></ol>
-            </div>
-          </div>
 
           <section id="lobby">
             <div class="quick">
@@ -689,28 +685,39 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
       <section class="panel" id="laps">
         <div class="ph"><h2>Lap Records</h2><span id="laps-count" class="pill">…</span></div>
         <div class="pb">
+          <div id="rec-tabs" class="tabs big" role="tablist"><button data-t="laps" class="on" role="tab">Lap Records</button><button data-t="active" role="tab">Most Active</button></div>
+          <div id="rec-laps">
           <div class="lapbar">
             <select id="laps-track" aria-label="Track"></select>
             <div id="laps-dir" class="tabs"><button data-d="f" class="on">Forward</button><button data-d="b">Backward</button></div>
           </div>
           <ol id="laps-list"></ol>
           <p id="laps-note" hidden></p>
-          <p class="muted lapnote">Each racer's best lap on the track, from any race you finish a lap in: single race, tournament, knockout, pursuit or online. Laps driven with mods on don't count. <b>▶ replay</b>: the game's replay of the race the lap was in, to watch in your game.
-            Tags: <span class="ltag">IS</span> instant steering, <span class="ltag">MIR</span> mirrored, <span class="ltag">NGT</span> night, <span class="ltag">WTH</span> weather.</p>
+          <details class="lapnote muted"><summary>Each racer's best lap, from any race you finish a lap in. Laps with mods on don't count.</summary>
+            Single race, tournament, knockout, pursuit or online all count. <b>▶ replay</b>: the game's replay of the race the lap was in, to watch in your game.
+            Tags: <span class="ltag">IS</span> instant steering, <span class="ltag">MIR</span> mirrored, <span class="ltag">NGT</span> night, <span class="ltag">WTH</span> weather.</details>
+          </div>
+          <div id="rec-active" hidden>
+            <div id="top" hidden>
+              <div class="bar"><h3>Racing time</h3>
+                <div id="top-tabs" class="tabs"><button data-w="24h">24h</button><button data-w="7d" class="on">7 days</button><button data-w="all">All</button></div></div>
+              <ol id="top-list"></ol>
+            </div>
+          </div>
         </div>
       </section>
       </section>
       <section class="screen" data-screen="options" aria-label="Options" hidden>
       <section class="panel" id="settings">
-        <div class="ph"><h2>Game Settings</h2><button id="set-reset" class="small secondary" title="Back to the default settings">Defaults</button></div>
+        <div class="ph"><h2>Options</h2><button id="set-reset" class="small secondary" title="Back to the default settings">Defaults</button></div>
         <div class="pb">
-          <p class="muted">Used every time you click <b>Start Game</b>, saved in this browser. Car, controls, sound and detail are in the game's own Options menu.</p>
+          <p class="muted">Saved in this browser, used each time the game starts. Car, controls, sound and detail are in the game's own Options menu.</p>
           <div class="opts">
             <label class="opt"><input type="checkbox" data-set="fullscreen"><span><b>Start in fullscreen</b><i>Alt+Enter switches during the game.</i></span></label>
-            <label class="opt"><input type="checkbox" data-set="fps"><span><b>FPS counter</b><i>Frames per second, bottom right.</i></span></label>
-            <label class="opt"><input type="checkbox" data-set="movies"><span><b>Intro movies</b><i>The EA intro and the menu demos. Off by default: in some browsers they can stall the start.</i></span></label>
-            <label class="opt"><input type="checkbox" data-set="unlock"><span><b>Everything unlocked</b><i>Bonus cars and Empire City from the first race. Once the game has saved them, they stay.</i></span></label>
+            <label class="opt"><input type="checkbox" data-set="pads"><span><b>Gamepads and wheels</b><i>Off keeps the keyboard as player 1 with a controller plugged in.</i></span></label>
             <label class="opt"><input type="checkbox" data-set="instant"><span><b>Instant steering</b><i>The old NFS3 joystick trick, for any controls: the wheels snap to full lock at once instead of over a quarter second. Quicker into corners, twitchier on the straights.</i></span></label>
+            <label class="opt"><input type="checkbox" id="mods-on"><span><b>Mods: rata_536's cars <span id="mods-count" class="pill">off</span></b><i>Every car rebuilt in higher quality: models, textures, sounds, colours and gearing; the police and traffic cars; PSX-style loading slides. Online, everyone in a race needs the same setting.</i></span></label>
+            <label class="opt sel"><b>Volume</b><span class="range"><input type="range" min="0" max="100" step="5" data-set="volume"><output id="set-volume-out">100%</output></span><i>On top of the game's own sound settings.</i></label>
             <label class="opt sel touch-set"><b>Touch steering</b><select data-set="touchSteer">
               <option value="buttons">Buttons</option><option value="stick">Thumb stick (slide)</option><option value="tilt">Tilt the phone</option><option value="off">Off (no touch controls)</option>
             </select><i>The stick and tilt steer gently or hard, like a gamepad. The round button at the top right switches during the game. The game takes the touch controls as a controller, so a keyboard doesn't drive while they're on.</i></label>
@@ -719,7 +726,17 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
             </select><i>Auto sizes the buttons for this screen.</i></label>
             <label class="opt touch-set"><input type="checkbox" data-set="touchSwap"><span><b>Steer with the right thumb</b><i>Steering on the right, gas and brake on the left.</i></span></label>
             <label class="opt touch-set"><input type="checkbox" data-set="touchGears"><span><b>Gear buttons</b><i>Shift down and up, for a manual gearbox.</i></span></label>
-            <label class="opt"><input type="checkbox" data-set="pads"><span><b>Gamepads and wheels</b><i>Off keeps the keyboard as player 1 with a controller plugged in.</i></span></label>
+          </div>
+          <p id="mods-line" class="muted"></p>
+          <progress id="mods-bar" max="1" value="0" hidden></progress>
+          <details class="modinfo"><summary>What's in the mods</summary>
+          <p class="modsmall"><b>Included:</b> <span id="mods-list"></span></p>
+          <p class="modsmall">Made by <a href="https://www.nfsaddons.com/downloads/all/all/author:rata-536/" target="_blank" rel="noopener">rata_536</a>
+            (their mods on NFSAddons). Racing online? Everyone in the race should have the same setting.</p>
+          </details>
+          <details class="moreopts"><summary>More options</summary>
+          <p class="muted">Resolutions, sharpness, intro movies, the FPS counter, unlocks.</p>
+          <div class="opts">
             <label class="opt sel"><b>Resolutions</b><select data-set="screen">
               <option value="auto" id="set-screen-auto">Up to this screen</option>
               <option value="1280x720">Up to 1280×720</option><option value="1600x900">Up to 1600×900</option>
@@ -728,92 +745,59 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
             <label class="opt sel"><b>Sharpness</b><select data-set="quality">
               <option value="auto">Auto</option><option value="1">Fast (1×)</option><option value="2">Balanced (2×)</option><option value="3">Sharp (3×)</option><option value="4">Sharpest (4×)</option>
             </select><i>How many times the game picture is rendered over before it's scaled to the screen. Auto lowers it when the GPU falls behind.</i></label>
-            <label class="opt sel"><b>Volume</b><span class="range"><input type="range" min="0" max="100" step="5" data-set="volume"><output id="set-volume-out">100%</output></span><i>On top of the game's own sound settings.</i></label>
+            <label class="opt"><input type="checkbox" data-set="movies"><span><b>Intro movies</b><i>The EA intro and the menu demos. Off by default: in some browsers they can stall the start.</i></span></label>
+            <label class="opt"><input type="checkbox" data-set="fps"><span><b>FPS counter</b><i>Frames per second, bottom right.</i></span></label>
+            <label class="opt"><input type="checkbox" data-set="unlock"><span><b>Everything unlocked</b><i>Bonus cars and Empire City from the first race. Once the game has saved them, they stay.</i></span></label>
           </div>
-        </div>
-      </section>
-      <section class="panel" id="mods">
-        <div class="ph"><h2>Mods</h2><span id="mods-count" class="pill">off</span></div>
-        <div class="pb">
-          <label class="opt"><input type="checkbox" id="mods-on"><span><b>rata_536's remastered cars</b><i>Every car in the game
-            rebuilt in higher quality: new models and textures, new sounds, real colours and gearing that no longer skips shifts, plus
-            the police and traffic cars and PSX-style loading slides. A few cars also handle closer to the real thing.</i></span></label>
-          <p id="mods-line" class="muted"></p>
-          <progress id="mods-bar" max="1" value="0" hidden></progress>
-          <p class="modsmall"><b>Included:</b> <span id="mods-list"></span></p>
-          <p class="modsmall">Made by <a href="https://www.nfsaddons.com/downloads/all/all/author:rata-536/" target="_blank" rel="noopener">rata_536</a>
-            (their mods on NFSAddons). Racing online? Everyone in the race should have the same setting.</p>
+          </details>
         </div>
       </section>
         <div class="danger"><button id="forget" class="small secondary" hidden>Remove Game Files</button></div>
       </section>
       <section class="screen" data-screen="about" aria-label="About" hidden>
-      <section class="panel" id="guide">
-        <div class="ph"><h2>How to Race Online</h2></div>
+      <section class="panel" id="about">
+        <div class="ph"><h2>About</h2><a class="pill" href="#changelog">What's New ›</a></div>
         <div class="pb">
-          <ol class="steps">
-            <li><b>Get the game into this browser.</b> Wait for the game files to download automatically.
-              This happens once; next time they are already cached here.</li>
-            <li><b>Pick a name.</b> Type it under <i>Online Play → Your name</i>. It's what the others see in the room.</li>
-            <li><b>Make a room.</b> One player clicks <i>Create Room</i>, gives it a name, and optionally a password and a player limit (2–8).
-              Untick <i>Show in the room list</i> for a private room.</li>
-            <li><b>Bring your friends in.</b> Click <i>Copy invite link</i> and send it, or let them pick the room in the <i>Rooms</i> list and click <i>Join</i>.
-              Everyone in the room is listed with their ping and <i>direct</i> or <i>via server</i>.</li>
-            <li><b>Everyone clicks Start Game.</b> Wait until all players see the game's menu.</li>
-            <li><b>Host the race.</b> The player shown as <i>Best host</i> goes to <b>Connect Players → Network IPX → Create Game</b>.
-              For two players choose <b>Peer-to-Peer</b>, for more <b>Client-Server</b>.</li>
-            <li><b>Join the race.</b> The others go to <b>Connect Players → Network IPX</b>, pick the game under <b>Games Available</b> and click <b>Join Game</b>.</li>
-            <li><b>Race.</b> The host picks the track and starts. The badge at the top left shows the room and each racer's ping. Click it to copy the invite link.</li>
-          </ol>
-          <dl class="specs">
-            <dt>Lag</dt><dd>Your own car reacts at once; the other cars show up about half a ping late. The lowest-ping player still makes the best host.</dd>
-            <dt>Via server</dt><dd>If two browsers can't connect directly (strict routers), packets go through this server instead. It works, just a little slower.</dd>
-            <dt>Keep it visible</dt><dd>Leave every game window open while racing. A minimised tab can fall behind.</dd>
-            <dt>Names</dt><dd>The name inside the game's own lobby is the game's <i>Player 1 Name</i> setting. Change it there to match.</dd>
-            <dt>Controllers</dt><dd>Gamepads and wheels work: turn them on in <i>Game Settings</i>, press a button on yours before <i>Start Game</i> (the browser only shows it after a press), then set it up in <b>Options → Controllers</b>. On a pad the triggers are gas and brake and Start pauses.</dd>
-          </dl>
-        </div>
-      </section>
-      <section class="panel" id="work">
-        <div class="ph"><h2>Original Game · Our Work</h2></div>
-        <div class="pb">
+          <p>This is <b>Need for Speed III: Hot Pursuit</b> (PC, 1998, with VEG's Modern Patch) running in your browser. The game's own code is
+            recompiled to WebAssembly and its Voodoo2 graphics are drawn with WebGL&nbsp;2: the same cars, tracks, physics and music, nothing remade.
+            The game files download once (about 350&nbsp;MB) and stay in this browser.</p>
           <div class="twocol">
             <div>
               <h3 class="minor">Untouched: the real NFS3</h3>
               <ul class="ticks">
-                <li><b>Handling and physics:</b> every car drives exactly like on a 1999 PC. The original code runs, recompiled, not rewritten or re-tuned.</li>
-                <li><b>Cars, tracks, AI and police:</b> the original game data, the original opponent and Hot Pursuit logic.</li>
-                <li><b>Music and sound:</b> the original soundtrack and effects through the game's own sound engine.</li>
-                <li><b>Menus and modes:</b> Single Race, Hot Pursuit, Knockout, Tournament, Showcase, as you remember them.</li>
+                <li><b>Handling and physics</b> exactly as on a 1999 PC: the original code, not rewritten.</li>
+                <li><b>Cars, tracks, AI and police:</b> the original game data and logic.</li>
+                <li><b>Music and sound</b> through the game's own sound engine.</li>
+                <li><b>Every mode:</b> Single Race, Hot Pursuit, Knockout, Tournament, Showcase.</li>
               </ul>
             </div>
             <div>
               <h3 class="minor">Added: what makes it run here</h3>
               <ul class="ticks plus">
-                <li><b>Static recompilation:</b> the game's x86 code is translated to C and WebAssembly, so it runs natively in the browser with no PC emulator.</li>
-                <li><b>Voodoo2 on your GPU:</b> the 3dfx Glide graphics path is redrawn with WebGL 2, keeping the Voodoo fog, depth and blending, and scaled up sharply.</li>
-                <li><b>Internet multiplayer:</b> the game's LAN mode now works over the internet. Rooms with passwords and a room browser,
-                  direct browser-to-browser links, lost packets recovered in one tick, and a best-host pick so the lag goes to the fewest players.</li>
-                <li><b>Browser comfort:</b> one-time download into browser storage, mouse capture, audio, smart pacing when the tab is hidden.</li>
+                <li><b>Recompiled</b> from x86 to C and WebAssembly: no PC emulator.</li>
+                <li><b>Voodoo2 on your GPU:</b> Glide redrawn with WebGL&nbsp;2, fog and all, sharper.</li>
+                <li><b>Online over the internet:</b> the LAN mode with rooms, direct links between browsers and a server fallback.</li>
+                <li><b>Browser comfort:</b> one download, controllers, touch controls, lap records.</li>
               </ul>
             </div>
           </div>
-          <p class="muted credit-line">Built on the <a href="https://veg.by/en/projects/nfs3/" target="_blank" rel="noopener">NFS3 Modern Patch</a>
-            by VEG (HD and widescreen support, 200+ fixes). The hosted game files include this patch.</p>
-        </div>
-      </section>
-      <section class="panel" id="about">
-        <div class="ph"><h2>Read Me</h2></div>
-        <div class="pb">
-          <p>This page runs <b>Need for Speed III: Hot Pursuit</b> (PC, modern patch) straight in your browser: the original
-            game code is recompiled to WebAssembly, and the Voodoo2 graphics go through WebGL.
-            Game files download from this server automatically and are cached in this browser for future visits.</p>
           <dl class="specs">
-            <dt>Browser</dt><dd>Chrome, Edge, Firefox or Safari with WebGL&nbsp;2</dd>
-            <dt>Controls</dt><dd>Keyboard like the original; click the picture to capture the mouse, Esc releases it</dd>
-            <dt>Online</dt><dd>Up to 8 racers per room, direct browser-to-browser links with relay fallback</dd>
-            <dt>Storage</dt><dd>About 400&nbsp;MB for the game files</dd>
+            <dt>Browser</dt><dd>Chrome, Edge, Firefox or Safari with WebGL&nbsp;2. Not in Instagram's or Facebook's own browsers.</dd>
+            <dt>Controls</dt><dd>Keyboard like the original; gamepads and wheels (Options); touch controls on phones. Click the picture to capture the mouse, Esc releases it.</dd>
+            <dt>Online</dt><dd>Up to 8 racers a room. Keep the game's tab in front while racing: a hidden tab falls behind.</dd>
           </dl>
+          <div class="about-links">
+            <a class="discord" href="https://discord.gg/sAjTGE7gkw" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg><span><b>Join our Discord</b>Help, bug reports, ideas, races</span></a>
+            <div class="more"><b>More races</b>
+              <a href="https://nfs2se.xyz/" target="_blank" rel="noopener"><span>nfs2se.xyz ›</span>Need for Speed II: Special Edition</a>
+              <a href="https://nfs4.xyz/" target="_blank" rel="noopener"><span>nfs4.xyz ›</span>Need for Speed: High Stakes</a></div>
+            <div class="maker"><b>Created by</b>
+              <a href="https://github.com/mrz944" target="_blank" rel="noopener">Marcin Zadka</a><br>
+              Source on <a href="https://github.com/mrz944/nfs3-web" target="_blank" rel="noopener">GitHub ›</a></div>
+          </div>
+          <p class="muted credit-line">Built on the <a href="https://veg.by/en/projects/nfs3/" target="_blank" rel="noopener">NFS3 Modern Patch</a> by VEG.
+            Mods by <a href="https://www.nfsaddons.com/downloads/all/all/author:rata-536/" target="_blank" rel="noopener">rata_536</a>.
+            Flags: Twemoji (CC-BY 4.0). Fan-made, not affiliated with Electronic Arts.</p>
         </div>
       </section>
       </section>
@@ -870,7 +854,7 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
 <button id="fullscreen" type="button" hidden title="Fullscreen (Alt+Enter)" aria-label="Fullscreen"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path class="fs-on" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /><path class="fs-off" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" /></svg></button>
 <div id="fstip" hidden role="status"><b>Fullscreen on iPhone:</b> Safari only lets videos go fullscreen. Open the Share menu (on iOS 26 tap ⋯ first), choose <b>Add to Home Screen</b> and play from that icon: no address bar, the whole screen.</div>
 <div id="hint" hidden>Click to capture the mouse · Esc releases it · Alt+Enter fullscreen</div>
-<div id="loading" hidden><div><div class="ltitle">Need for Speed III</div><div id="loading-text">Loading the game…</div><div class="lbar"><i></i></div></div></div>
+<div id="loading" hidden><div><div class="ltitle">Need for Speed III</div><div id="loading-text">Loading the game…</div><div class="lbar"><i></i></div><div id="tip" class="ltip"></div></div></div>
 <div id="loadbadge" hidden>Loading…</div>
 <script>
 // Lo-fi look (see the comment at the top): the backdrop and the logo are drawn at low resolution
