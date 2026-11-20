@@ -1647,6 +1647,33 @@ function setupLaps() {
       : [el('li', { className: 'muted', textContent: `No laps on ${trackName(Number(sel.value))} ${dir === 'b' ? 'backward' : 'forward'} yet. Finish one and it shows here.` })]));
     const names = new Set(); for (const b of Object.values(data?.boards || {})) for (const r of b) names.add(r.p || 'n:' + r.n.toLowerCase());
     $('laps-count').textContent = names.size ? `${names.size} racer${names.size === 1 ? '' : 's'}` : 'no laps yet';
+    teaser(mine);
+  }
+  // the Play screen's few records: the player's own best laps once they have some, else the
+  // records set this week (else the latest ones); a click opens that board
+  function teaser(mine) {
+    const all = Object.entries(data?.boards || {}), own = [];
+    for (const [k, rows] of all) rows.forEach((r, i) => { if (mine(r)) own.push({ k, r, rank: i + 1 }); });
+    const firsts = all.filter(([, rows]) => rows[0]).map(([k, rows]) => ({ k, r: rows[0], rank: 1 })).sort((a, b) => b.r.t - a.r.t);
+    const week = firsts.filter((x) => Date.now() - x.r.t < 7 * 864e5);
+    const [items, title] = own.length ? [own.sort((a, b) => a.rank - b.rank || b.r.t - a.r.t), 'Your best laps']
+      : week.length ? [week, 'Lap records this week'] : [firsts, 'Latest lap records'];
+    $('home-laps').hidden = !items.length;
+    $('home-laps-title').textContent = title;
+    $('home-laps-list').replaceChildren(...items.slice(0, 3).map(({ k, r, rank }) => {
+      const [t, d] = k.split(':');
+      const li = el('li', { title: 'Open this board' },
+        el('span', { className: 't', textContent: `${trackName(Number(t))}${d === 'b' ? ' backward' : ''}` }),
+        el('span', { className: 'tm', textContent: lapTime(r.ticks) }),
+        el('span', { className: 'w', textContent: own.length ? `#${rank} · ${carName(r.car)}` : `${r.n} · ${carName(r.car)}` }));
+      li.onclick = () => {
+        want = t; dir = d === 'b' ? 'b' : 'f';
+        try { localStorage.setItem('nfs3.lapsTrack', want); localStorage.setItem('nfs3.lapsDir', dir); } catch {}
+        sel.value = want; for (const b of $('laps-dir').children) b.classList.toggle('on', b.dataset.d === dir);
+        draw(); location.hash = 'records';
+      };
+      return li;
+    }));
   }
   // a replay into the game (fedata/save, where its Load > Replays list looks), or a download
   // when the game isn't in this browser yet

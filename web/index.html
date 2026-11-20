@@ -85,6 +85,22 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   .hero { display: flex; gap: 12px; flex-wrap: wrap; } .hero:not(:has(> :not([hidden]))) { display: none; }
   .mbtn.big { height: 44px; font-size: 16px; min-width: 220px; padding: 0 18px 0 22px; }
   .danger { display: flex; justify-content: flex-end; }
+  /* the Play screen: two big buttons, the download under them, who's around, the latest records */
+  .home .hero { margin: 4px 0 12px; }
+  .home .hero > * { flex: 1 1 220px; }
+  #start:not([hidden]) ~ #play-wait, #pick-label:not([hidden]) ~ #play-wait { display: none; }
+  .home #status:empty { display: none; }
+  .homeline { margin-top: 12px; padding-top: 10px; border-top: 2px solid #0e1a5c; }
+  .homeline p { margin: 4px 0; }
+  #home-laps .bar { margin-top: 12px; }
+  .small-link { font-size: 11px; color: var(--gold); text-decoration: none; } .small-link:hover { text-decoration: underline; }
+  #home-laps-list { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; }
+  #home-laps-list li { display: grid; grid-template-columns: minmax(0, 1.4fr) auto minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 4px 8px; cursor: pointer;
+    background: linear-gradient(90deg, #4d6dff 0 3px, rgba(40, 70, 190, .3) 3px, rgba(10, 20, 80, .15)); margin-bottom: 3px; }
+  #home-laps-list li:hover { background: linear-gradient(90deg, var(--gold) 0 3px, rgba(60, 90, 210, .4) 3px, rgba(10, 20, 80, .2)); }
+  #home-laps-list .t { color: #fff; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #home-laps-list .tm { color: var(--gold); font: 700 16px/1 var(--px); }
+  #home-laps-list .w { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
   .menu .ico, .menu .s { display: none; }
   .mbtn.on { color: var(--gold);
     background: linear-gradient(90deg, var(--gold) 0 6px, var(--amber) 6px 10px, transparent 10px),
@@ -537,19 +553,29 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
       <div id="update" class="card" hidden>A newer version of the game is on the server. <button id="update-reload" class="small">Reload to update</button></div>
 
       <section class="screen" data-screen="play" aria-label="Play">
-        <div class="hero">
-          <button id="start" class="mbtn go big" hidden>Start Game</button>
-          <label class="btn mbtn" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
-        </div>
-      <section class="panel">
-        <div class="ph"><h2>Status</h2></div>
+      <section class="panel home">
         <div class="pb">
+          <div class="hero">
+            <button id="start" class="mbtn go big" hidden>Play</button>
+            <label class="btn mbtn go big" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
+            <button id="play-wait" class="mbtn go big" disabled title="Once the game files are here">Play</button>
+            <a class="mbtn big" href="#online" id="go-online">Race Online</a>
+          </div>
           <p id="status"></p>
           <button id="dl-go" class="small" hidden>Download the game</button>
           <button id="tab-here" class="small" hidden>Play here instead</button>
           <progress id="progress" max="1" value="0" hidden></progress>
           <div id="log" hidden></div>
           <p class="logtoggle"><a href="#" id="log-toggle">Show technical log</a></p>
+          <div class="homeline">
+            <p id="live-line" class="live">…</p>
+            <div id="live-names"></div>
+            <p id="daily" hidden></p>
+          </div>
+          <div id="home-laps" hidden>
+            <div class="bar"><h3 id="home-laps-title">Lap records this week</h3><a href="#records" class="small-link">All records ›</a></div>
+            <ol id="home-laps-list"></ol>
+          </div>
         </div>
       </section>
       </section>
@@ -566,9 +592,6 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           <p id="lobby-msg" class="msg" hidden></p>
 
           <div id="activity">
-            <p id="live-line" class="live">…</p>
-            <div id="live-names"></div>
-            <p id="daily" hidden></p>
             <button id="notify" class="small secondary" hidden>🔔 Notify me when people race</button>
             <div id="top" hidden>
               <div class="bar"><h3>Most Active Racers</h3>
