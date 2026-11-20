@@ -1552,7 +1552,7 @@ function setupOnline() {
     } catch (err) { message(err.message); }
     redraw();
   });
-  $('leave-room').onclick = () => { net.leave(); history.replaceState(null, '', location.pathname + location.search); redraw(); };
+  $('leave-room').onclick = () => { net.leave(); history.replaceState(null, '', location.pathname + location.search + '#online'); redraw(); };
   $('copy-link').onclick = () => navigator.clipboard?.writeText(roomLink(net.room)).then(() => {
     $('copy-link').textContent = 'Copied'; setTimeout(() => { $('copy-link').textContent = 'Copy invite link'; }, 1200);
   });
@@ -1953,7 +1953,36 @@ function setupPlayer() {
   fromHash();
 }
 
+// The page's screens (index.html, .screen): one at a time, picked by the address (#play,
+// #online, #records, #options, #about; #room=code is the online screen), like the game's menus.
+const SCREENS = ['play', 'online', 'records', 'options', 'about'];
+let screenNow = '';
+function showScreen(name, user = false) {
+  if (!SCREENS.includes(name)) name = 'play';
+  for (const s of document.querySelectorAll('.screen')) s.hidden = s.dataset.screen !== name;
+  for (const a of document.querySelectorAll('[data-go]')) {
+    const on = a.dataset.go === name;
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+  if (name !== screenNow) {
+    screenNow = name;
+    if (user) { scrollTo({ top: 0 }); document.querySelector(`.screen[data-screen="${name}"] h2`)?.setAttribute('tabindex', '-1'); document.querySelector(`.screen[data-screen="${name}"] h2`)?.focus({ preventScroll: true }); }
+  }
+}
+function setupScreens() {
+  const fromHash = (user) => {
+    const h = location.hash.slice(1);
+    if (/^room=/.test(h)) showScreen('online');
+    else if (SCREENS.includes(h)) showScreen(h, user);
+    else if (!h) showScreen('play', user);                     // #changelog, #player: dialogs over the screen
+  };
+  window.addEventListener('hashchange', () => fromHash(true));
+  fromHash(false);
+}
+
 async function init() {
+  setupScreens();
   setupLogToggle();
   setupSettings();
   $('tip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];

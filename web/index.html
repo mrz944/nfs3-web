@@ -80,6 +80,17 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   #logo { display: block; image-rendering: pixelated; image-rendering: crisp-edges; max-width: 100%; height: auto; }
   .layout { display: grid; grid-template-columns: 260px 1fr; gap: 18px; margin-top: 12px; align-items: start; flex: 1; }
   @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } header { min-height: 64px; } }
+  /* one screen at a time (the menu's data-go, main.js setupScreens) */
+  .screen { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .hero { display: flex; gap: 12px; flex-wrap: wrap; } .hero:not(:has(> :not([hidden]))) { display: none; }
+  .mbtn.big { height: 44px; font-size: 16px; min-width: 220px; padding: 0 18px 0 22px; }
+  .danger { display: flex; justify-content: flex-end; }
+  .menu .ico, .menu .s { display: none; }
+  .mbtn.on { color: var(--gold);
+    background: linear-gradient(90deg, var(--gold) 0 6px, var(--amber) 6px 10px, transparent 10px),
+                linear-gradient(180deg, #7890f0 0 2px, #4862d8 2px 8px, #2c44b4 8px 16px, #1d3290 16px 24px, #12226a 24px); }
+  .mbtn.on::after { background: var(--gold); }
+
 
   /* ------------------------------------------------------- menu buttons */
   nav.menu { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
@@ -124,6 +135,20 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   .more a:hover, .more a:focus-visible { color: #fff; transform: translateX(4px); box-shadow: inset 6px 0 0 var(--gold), inset 0 -2px 0 var(--lo); outline: none; }
   .more a:hover span, .more a:focus-visible span { color: var(--gold); }
   .maker a { color: #fff; text-decoration: none; } .maker a:hover { color: var(--gold); text-decoration: underline; }
+
+  /* phones: the screens' buttons as a bar at the bottom, the rest of the menu on the About screen */
+  @media (max-width: 760px) {
+    #setup-wrap { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+    nav.menu { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; flex-direction: row; gap: 2px; padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+      background: linear-gradient(180deg, #0a1a6e, #040e48); box-shadow: inset 0 2px 0 var(--gold), 0 -6px 12px rgba(0, 0, 0, .5); }
+    nav.menu > :not([data-go]) { display: none; }
+    nav.menu [data-go] { flex: 1 1 0; min-width: 0; height: auto; flex-direction: column; justify-content: center; gap: 3px; padding: 6px 0; clip-path: none; background: none; text-align: center; }
+    nav.menu [data-go]::after { display: none; }
+    nav.menu [data-go] .l { display: none; }
+    nav.menu [data-go] .s { display: block; font: 700 10px/1 var(--ui); letter-spacing: .04em; }
+    nav.menu .ico { display: block; font: 18px/1 "Segoe UI Symbol", "DejaVu Sans", sans-serif; font-style: normal; }
+    nav.menu [data-go].on { background: linear-gradient(180deg, rgba(255, 216, 0, .18), transparent); box-shadow: inset 0 2px 0 var(--gold); }
+  }  .screen h2[tabindex="-1"]:focus { outline: none; }
 
   /* small buttons inside panels */
   button { padding: 6px 12px; font-size: 16px; clip-path: var(--notch); text-transform: uppercase;
@@ -483,15 +508,12 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   </header>
 
   <div class="layout">
-    <nav class="menu" aria-label="Game">
-      <button id="start" class="mbtn go" hidden>Start Game</button>
-      <label class="btn mbtn" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
-      <a class="mbtn" href="#online">Online Play…</a>
-      <a class="mbtn" href="#settings">Settings…</a>
-      <a class="mbtn" href="#mods">Mods…</a>
-      <a class="mbtn" href="#guide">How to Race…</a>
-      <a class="mbtn" href="#work">What We Built…</a>
-      <a class="mbtn" href="#about">Read Me…</a>
+    <nav class="menu" aria-label="Screens">
+      <a class="mbtn" href="#play" data-go="play"><i class="ico" aria-hidden="true">▶</i><span class="l">Play</span><span class="s">Play</span></a>
+      <a class="mbtn" href="#online" data-go="online"><i class="ico" aria-hidden="true">⚑</i><span class="l">Race Online</span><span class="s">Online</span></a>
+      <a class="mbtn" href="#records" data-go="records"><i class="ico" aria-hidden="true">★</i><span class="l">Lap Records</span><span class="s">Records</span></a>
+      <a class="mbtn" href="#options" data-go="options"><i class="ico" aria-hidden="true">⚙</i><span class="l">Options</span><span class="s">Options</span></a>
+      <a class="mbtn" href="#about" data-go="about"><i class="ico" aria-hidden="true">?</i><span class="l">About</span><span class="s">More</span></a>
       <a class="mbtn" id="changelog-open" href="#changelog">What's New… <i class="clnew">new</i></a>
       <div class="sep"></div>
       <div class="hint" id="pad"></div>
@@ -503,7 +525,6 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
       <div class="maker"><b>Created by</b>
         <a href="https://github.com/mrz944" target="_blank" rel="noopener">Marcin Zadka</a><br>
         Source on <a href="https://github.com/mrz944/nfs3-web" target="_blank" rel="noopener">GitHub ›</a></div>
-      <button id="forget" class="mbtn dim forget" hidden>Remove Game Files</button>
       <div class="hint">Game files download automatically and are cached in this browser.</div>
     </nav>
 
@@ -514,6 +535,12 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
         <br>Or copy the link and paste it into your browser: <input id="inapp-link" readonly> <button id="inapp-copy" class="small secondary">Copy link</button></div>
       <div id="ios-app" class="card" hidden><b>Fullscreen on iPhone:</b> open Safari's Share menu (on iOS 26 tap ⋯ first), choose <b>Add to Home Screen</b>, then start the game from its new icon. It has its own storage, so the game files download once more there. <button id="ios-app-ok" class="small secondary">Got it</button></div>
       <div id="update" class="card" hidden>A newer version of the game is on the server. <button id="update-reload" class="small">Reload to update</button></div>
+
+      <section class="screen" data-screen="play" aria-label="Play">
+        <div class="hero">
+          <button id="start" class="mbtn go big" hidden>Start Game</button>
+          <label class="btn mbtn" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
+        </div>
       <section class="panel">
         <div class="ph"><h2>Status</h2></div>
         <div class="pb">
@@ -525,7 +552,8 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           <p class="logtoggle"><a href="#" id="log-toggle">Show technical log</a></p>
         </div>
       </section>
-
+      </section>
+      <section class="screen" data-screen="online" aria-label="Race Online" hidden>
       <section class="panel" id="online">
         <div class="ph"><h2>Online Play</h2><span id="server-state" class="pill">connecting…</span></div>
         <div class="pb">
@@ -616,7 +644,8 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           </section>
         </div>
       </section>
-
+      </section>
+      <section class="screen" data-screen="records" aria-label="Lap Records" hidden>
       <section class="panel" id="laps">
         <div class="ph"><h2>Lap Records</h2><span id="laps-count" class="pill">…</span></div>
         <div class="pb">
@@ -630,7 +659,8 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
             Tags: <span class="ltag">IS</span> instant steering, <span class="ltag">MIR</span> mirrored, <span class="ltag">NGT</span> night, <span class="ltag">WTH</span> weather.</p>
         </div>
       </section>
-
+      </section>
+      <section class="screen" data-screen="options" aria-label="Options" hidden>
       <section class="panel" id="settings">
         <div class="ph"><h2>Game Settings</h2><button id="set-reset" class="small secondary" title="Back to the default settings">Defaults</button></div>
         <div class="pb">
@@ -662,7 +692,6 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           </div>
         </div>
       </section>
-
       <section class="panel" id="mods">
         <div class="ph"><h2>Mods</h2><span id="mods-count" class="pill">off</span></div>
         <div class="pb">
@@ -676,7 +705,9 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
             (their mods on NFSAddons). Racing online? Everyone in the race should have the same setting.</p>
         </div>
       </section>
-
+        <div class="danger"><button id="forget" class="small secondary" hidden>Remove Game Files</button></div>
+      </section>
+      <section class="screen" data-screen="about" aria-label="About" hidden>
       <section class="panel" id="guide">
         <div class="ph"><h2>How to Race Online</h2></div>
         <div class="pb">
@@ -703,7 +734,6 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           </dl>
         </div>
       </section>
-
       <section class="panel" id="work">
         <div class="ph"><h2>Original Game · Our Work</h2></div>
         <div class="pb">
@@ -732,7 +762,6 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
             by VEG (HD and widescreen support, 200+ fixes). The hosted game files include this patch.</p>
         </div>
       </section>
-
       <section class="panel" id="about">
         <div class="ph"><h2>Read Me</h2></div>
         <div class="pb">
@@ -747,6 +776,8 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           </dl>
         </div>
       </section>
+      </section>
+
     </div>
   </div>
 
