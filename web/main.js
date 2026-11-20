@@ -406,6 +406,40 @@ async function writeGameName(name) {
   } catch {}
   log(`name: the game will call you "${name}"`);
 }
+// The controller's setup in config.dat: the game keeps a controller's buttons only while that
+// controller is there at start; a game started without it sets player 1 back to the keyboard and
+// saves that on exit, and the controller starts from its defaults next time. Found by comparing
+// the config block with and without a controller (2026-11-20): the controller record (its name at
+// 0xe34, axis settings) at 0xe30, player 1's and 2's controls at 0x16c4, and three flags at
+// 0x179c. Each Start with a controller keeps a copy of these (per controller, in this browser)
+// while config.dat holds that controller's setup, and puts it back when the last save was made
+// without it.
+const PAD_CFG = [[0xe30, 0xeb8], [0x16c4, 0x1768], [0x179c, 0x17a8]], PAD_CFG_NAME = 0xe34;
+async function keepPadSetup(name) {
+  name = name.replace(/[^\x20-\x7e]/g, '').slice(0, 63);
+  if (!name) return;
+  try {
+    const cfgDir = await (await gameDir()).getDirectoryHandle('fedata').then((d) => d.getDirectoryHandle('config'));
+    const cfg = await fileBytes(cfgDir, 'config.dat');
+    if (!cfg || cfg.length !== 8432) return;
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('nfs3.padcfg') || '{}'); } catch {}
+    let e = PAD_CFG_NAME; while (e < PAD_CFG_NAME + 52 && cfg[e]) e++;
+    const inFile = new TextDecoder('latin1').decode(cfg.subarray(PAD_CFG_NAME, e));
+    if (inFile && (name.startsWith(inFile) || inFile.startsWith(name))) {
+      const parts = PAD_CFG.map(([a, b]) => cfg.subarray(a, b));
+      saved[name] = btoa(String.fromCharCode(...parts.flatMap((p) => [...p])));
+      const keep = Object.keys(saved).slice(-4);                        // a few controllers at most
+      try { localStorage.setItem('nfs3.padcfg', JSON.stringify(Object.fromEntries(keep.map((k) => [k, saved[k]])))); } catch {}
+    } else if (saved[name]) {
+      const bytes = Uint8Array.from(atob(saved[name]), (c) => c.charCodeAt(0));
+      let o = 0;
+      for (const [a, b] of PAD_CFG) { cfg.set(bytes.subarray(o, o + b - a), a); o += b - a; }
+      await writeBytes(cfgDir, 'config.dat', cfg);
+      log(`controller: ${name}'s buttons put back (the game was last saved without it${inFile ? `, with ${inFile}` : ''})`);
+    }
+  } catch (err) { log('controller: setup not kept:', err.message); }
+}
 async function fileBytes(dir, name) { try { return new Uint8Array(await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer()); } catch { return null; } }
 async function writeBytes(dir, name, bytes) { await writeFile(dir, name, exact(bytes)); }
 
@@ -1188,6 +1222,7 @@ async function start() {
   // the game saves replays, ghosts, knockouts and tournaments in fedata/save, which the download
   // doesn't make (it has no files)
   try { await (await (await gameDir()).getDirectoryHandle('fedata')).getDirectoryHandle('save', { create: true }); } catch {}
+  if (padsAtStart) await keepPadSetup(padName(padList()[0]));
   await writeGameName($('pname')?.value);
   const startT = performance.now();
   const dev = await deviceInfo();
@@ -1206,7 +1241,8 @@ async function start() {
     onGameMessage: (t) => { log('ERROR game message:', t); track('error', { kind: 'message', msg: t }); noteCrash(t); },
     onLap: reportLap,                                                // each lap the player finishes (game.c)
     onGameExit: (code) => {
-      if (code === 0) { log('game quit: back to the start page'); backToPage(); return; }
+      // (the game has just saved config.dat: keep the controller's setup as it is now)
+      if (code === 0) { log('game quit: back to the start page'); (padsAtStart && padList().length ? keepPadSetup(padName(padList()[0])) : Promise.resolve()).finally(backToPage); return; }
       log('ERROR game exited, code', code); track('error', { kind: 'exit', msg: 'code ' + code }); gameStopped('The game closed itself (see the log). Reload the page to start again.');
     },
     // the screen in pixels, landscape: the game offers the resolutions that fit (glide.c)
