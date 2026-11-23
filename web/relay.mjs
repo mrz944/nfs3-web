@@ -303,6 +303,11 @@ class Client {
       if (!Object.keys(out).length) return;
       for (const c of this.room.members.values()) c.json({ t: 'me', id: this.id, ...memberView(this) });
       if (!!this.ready !== was) { say(this.room, `${this.name} is ${this.ready ? 'ready' : 'not ready'}.`); recount(this.room, this.ready); roomsChanged(); }
+    } else if (m.t === 'auto' && this.id) {
+      const st = Number(m.state);
+      if (!Number.isInteger(st) || st < 0 || st > 9 || st === this.auto) return;
+      this.auto = st;
+      for (const c of this.room.members.values()) if (c !== this) c.json({ t: 'auto', id: this.id, state: st });
     } else if (m.t === 'chat' && this.id) {
       const line = chatLine(this, m.text);
       if (line) addChat(this.room, line);
@@ -341,7 +346,7 @@ class Client {
   adopt(old) {
     clearTimeout(old.awayTimer); old.awayTimer = null;
     tokens.delete(old.token);
-    for (const k of ['id', 'room', 'name', 'p', 'rtt', 'state', 'gameSince', 'bin', 'binClient', 'car', 'trans', 'color', 'ready', 'dl', 'mods', 'info', 'chatLast', 'chatText', 'chatTimes']) this[k] = old[k];
+    for (const k of ['id', 'room', 'name', 'p', 'rtt', 'state', 'gameSince', 'bin', 'binClient', 'car', 'trans', 'color', 'ready', 'dl', 'mods', 'auto', 'info', 'chatLast', 'chatText', 'chatTimes']) this[k] = old[k];
     this.cc ||= old.cc;
     if (this.binClient) this.binClient.binFor = this;
     this.token = randomBytes(12).toString('hex'); tokens.set(this.token, this);

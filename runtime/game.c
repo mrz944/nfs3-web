@@ -142,6 +142,7 @@ static void mode_label(void) {
 }
 
 void game_frame(void) {
+    { extern void autopilot_frame(void); autopilot_frame(); }   /* the online race's menus (autopilot.c) */
     mode_label();
     instant_steering();
     lap_watch();

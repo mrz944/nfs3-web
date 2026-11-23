@@ -129,7 +129,7 @@ export function setupRoom(d) {
     }
     box.append(main, el('details', { className: 'assists' }, el('summary', { textContent: 'Driving assists' }), assists));
     const owner = l.owner === net.id ? 'You set up the race.' : `${nameOf(l.owner)} sets up the race.`;
-    $('race-note').textContent = `${owner} The game takes these settings once the automatic start is in (staging: coming next).`;
+    $('race-note').textContent = `${owner} Track, laps, direction, mirrored, night and weather go into the game; class, AI, traffic and assists are coming.`;
   }
   function drawCar() {
     const sel = $('my-car');
@@ -150,7 +150,10 @@ export function setupRoom(d) {
   function memberRow(id) {
     const me = id === net.id, m = memberOf(id), p = net.peers.get(id), l = L();
     const racing = l?.launch?.seats?.includes(id) && (l.phase === 'launch' || l.phase === 'racing');
-    const status = racing ? ['racing', 'Racing'] : m.ready ? ['ready', 'Ready'] : m.dl != null && m.dl < 100 ? ['dl', 'No game files yet'] : ['wait', 'Not ready'];
+    // during the start, what each player's game is doing (runtime/autopilot.c, the 'auto' state)
+    const AUTO_ST = { 1: 'Starting the game…', 2: 'Race created', 3: 'Joined the race', 4: 'Ready in the game', 5: 'Racing', 9: 'Stuck: joining by hand' };
+    const status = racing ? ['racing', l.phase === 'launch' || m.auto && m.auto < 5 ? AUTO_ST[m.auto] || 'Starting the game…' : 'Racing']
+      : m.ready ? ['ready', 'Ready'] : m.dl != null && m.dl < 100 ? ['dl', 'No game files yet'] : ['wait', 'Not ready'];
     const who = el('span', { className: 'who' }, d.flagged(me ? `${nameOf(id)} (you)` : nameOf(id), me ? net.cc : p?.cc));
     if (l?.owner === id) who.append(el('span', { className: 'tag', textContent: 'owner', title: 'Sets up the race' }));
     if (l?.pin === id) who.append(el('span', { className: 'tag race', textContent: 'host', title: 'The owner picked this player to host' }));

@@ -1204,6 +1204,49 @@ function waitForPad() {
 }
 const rememberPad = () => { const p = padList()[0]; if (p) try { localStorage.setItem(PAD_KEY, padName(p)); } catch {} };
 
+// ------------------------------------------------------------- autopilot
+// When the room's countdown ends, the game walks its own menus (runtime/autopilot.c): Connect
+// Players, Network IPX, create or join the host's game, the room's race settings, Ready, Start.
+// The loading cover stays over it, saying what's happening, until the race is on.
+let autoPlan = null, autoHold = false, autoState = 0, autoGoAt = 0, gameMod = null;
+const AUTO = { OFF: 0, MENUS: 1, CREATED: 2, JOINED: 3, READY: 4, RACING: 5, LOBBY: 6, FAILED: 9 };
+function autoBegin(mod) {
+  if (!autoPlan || !mod?._rt_auto_start) { if (autoPlan) log('auto: this game build has no autopilot'); autoPlan = null; return; }
+  autoHold = true; autoGoAt = 0;
+  mod.ccall('rt_auto_start', null, ['number', 'number', 'string'], [autoPlan.role, autoPlan.seats, autoPlan.role === 1 ? autoPlan.race : '']);
+  log(`auto: ${autoPlan.role === 1 ? 'hosting' : 'joining'} the room's race (${autoPlan.seats} players${autoPlan.role === 1 ? ', ' + autoPlan.race : ''})`);
+}
+function autoText(s) {
+  const host = autoPlan?.role === 1 ? null : net.peers.get(autoPlan?.host)?.name || 'the host';
+  return s === AUTO.MENUS ? (host ? `Joining ${host}'s race…` : 'Creating the race…')
+    : s === AUTO.CREATED ? 'Waiting for the others to join…'
+    : s === AUTO.JOINED ? `In ${host}'s race, getting ready…`
+    : s === AUTO.READY ? `Ready. Waiting for ${host} to start…` : '';
+}
+function autoChanged(s) {
+  autoState = s;
+  log('auto: state', s);
+  net.setAuto(s);
+  const t = autoText(s);
+  if (t) $('loading-text').textContent = t;
+  if (s === AUTO.RACING || s === AUTO.FAILED || s === AUTO.OFF || s === AUTO.LOBBY) autoHold = false;
+  if (s === AUTO.FAILED) { $('hint').textContent = 'The automatic start got stuck: carry on in the game\'s menus (Connect Players › Network IPX).'; $('hint').hidden = false; }
+  if (s === AUTO.CREATED) autoGoAt = performance.now() + 45000;   // without everyone ready in 45 s, start with who is
+  autoCheckGo();
+}
+// the host starts once every other player's game says Ready (2.5 s later: the game's own lobby
+// needs a moment to see it), or after the 45 s wait
+function autoCheckGo() {
+  if (autoPlan?.role !== 1 || autoState !== AUTO.CREATED || !gameMod) return;
+  const l = net.lobby, others = (l?.launch?.seats || []).filter((id) => id !== net.id && net.peers.has(id));
+  const allReady = others.length > 0 && others.every((id) => l.members[id]?.auto === AUTO.READY);
+  if (allReady || (autoGoAt && performance.now() > autoGoAt)) {
+    autoState = -1;                                                 // once
+    setTimeout(() => { gameMod.ccall('rt_auto_go', null, [], []); log('auto: go'); }, allReady ? 2500 : 0);
+  }
+}
+setInterval(autoCheckGo, 2000);
+
 async function start() {
   $('start').disabled = true;
   mark('click');
@@ -1241,6 +1284,7 @@ async function start() {
     onAbort: (what) => { log('ABORT', what); track('error', { kind: 'abort', msg: String(what) }); gameStopped(abortText(String(what))); },
     onGameMessage: (t) => { log('ERROR game message:', t); track('error', { kind: 'message', msg: t }); noteCrash(t); },
     onLap: reportLap,                                                // each lap the player finishes (game.c)
+    onAuto: (s) => autoChanged(s),                                   // the autopilot's progress (autopilot.c)
     onGameExit: (code) => {
       // (the game has just saved config.dat: keep the controller's setup as it is now)
       if (code === 0) { log('game quit: back to the start page'); (padsAtStart && padList().length ? keepPadSetup(padName(padList()[0])) : Promise.resolve()).finally(backToPage); return; }
@@ -1256,6 +1300,8 @@ async function start() {
   log('runtime ready, game thread running');
   mark('wasm');
   if (net.id) { mod.ccall('rt_net_set_node', null, ['string'], [net.id]); net.attach(mod); net.setState('game'); showNetBadge(); }
+  gameMod = mod;
+  if (autoPlan) autoBegin(mod);
   startPerfLog(mod);
   // replays of races with laps on the lap records go there too (replay-watch.js)
   gameDir().then((dir) => watchReplay({ dir, race: () => races.current, key: () => me.k, skip: () => modsOn, log })).catch(() => {});
@@ -1293,7 +1339,7 @@ async function start() {
       fpsN++;
       if (first) { first = false; mark('first'); log('first frame'); track('first_frame', { secs: (performance.now() - startT) / 1000 }); playStats.played = true; }
       playStats.frames++;
-      if (!cover.hidden && playStats.frames >= 8) {
+      if (!cover.hidden && playStats.frames >= 8 && !autoHold) {
         cover.hidden = true; mark('shown');
         track('load', { ...phase, cached: !phase.download });
         log('load phases:', Object.entries(phase).map(([k, v]) => `${k}=${v}s`).join(' '));
@@ -1301,7 +1347,7 @@ async function start() {
       badge.hidden = true;
     }
     if (cover.hidden && document.visibilityState === 'visible' && performance.now() - lastFresh > 1500) badge.hidden = false;
-    if (!cover.hidden && performance.now() - startT > 30000) $('loading-text').textContent = 'Still loading… if this stays black, reload the page.';
+    if (!cover.hidden && !autoHold && performance.now() - startT > 30000) $('loading-text').textContent = 'Still loading… if this stays black, reload the page.';
     const now = performance.now();
     if (first && !stalled && now - lastFresh > 30000) { stalled = true; log('stall: no first frame 30 s after start'); }
     if (!first && !stalled && now - lastFresh > 5000 && document.visibilityState === 'visible') {
@@ -1584,10 +1630,18 @@ function setupOnline() {
   // the countdown ran out and this player is in the race: start the game (the game's own menus
   // still connect it, with the badge saying who hosts, until the automatic start is in)
   net.addEventListener('launch', (e) => {
-    log(`online: the room starts the race, host ${e.detail.host === net.id ? 'me' : net.peers.get(e.detail.host)?.name}`);
+    const l = e.detail, r = l.race || {};
+    log(`online: the room starts the race, host ${l.host === net.id ? 'me' : net.peers.get(l.host)?.name}`);
+    // the game's autopilot walks its menus with this (runtime/autopilot.c)
+    autoPlan = {
+      role: l.host === net.id ? 1 : 2, seats: l.seats.length, host: l.host, launch: l.id,
+      race: `track=${r.track | 0},laps=${r.laps | 0},back=${r.dir === 'back' ? 1 : 0},mirror=${r.mirror ? 1 : 0},night=${r.night ? 1 : 0},weather=${r.weather ? 1 : 0}`,
+    };
     // (the Ready click earlier counts for the sound; fullscreen needs a click of its own: Alt+Enter)
     if (!gameStarted && gameHere && !$('start').disabled && !$('start').hidden) $('start').click();
+    else if (gameStarted && gameMod) autoBegin(gameMod);
   });
+  net.addEventListener('lobby', autoCheckGo);
 
   async function joinRoom(code, password, label) {
     if (needName()) return;

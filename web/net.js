@@ -192,6 +192,7 @@ export class Net extends EventTarget {
     else if (m.t === 'leave') { if (this.lobby) delete this.lobby.members[m.id]; const p = this.peers.get(m.id); if (p) { this.closePeer(m.id); this.emit('log', `${p.name} left`); this.emit('status'); } }
     else if (m.t === 'race' && this.lobby) { this.lobby.race = m.race; this.emit('lobby'); }
     else if (m.t === 'me' && this.lobby) { const { t, id, ...me } = m; this.lobby.members[id] = me; this.emit('lobby'); }
+    else if (m.t === 'auto' && this.lobby) { this.lobby.members[m.id] = { ...this.lobby.members[m.id], auto: m.state }; this.emit('lobby'); }
     else if (m.t === 'chat' && this.lobby) { this.lobby.chat.push(m.line); if (this.lobby.chat.length > 50) this.lobby.chat.shift(); this.emit('chat', m.line); }
     else if (m.t === 'phase' && this.lobby) {
       const was = this.lobby.launch?.id;
@@ -232,6 +233,7 @@ export class Net extends EventTarget {
   get countdownLeft() { const l = this.lobby; return !l || l.phase !== 'countdown' ? 0 : l.held ? l.left : Math.max(0, l.left - (performance.now() - l.at)); }
   setRace(race) { this.send({ t: 'race', race }); }
   setMe(me) { this.send({ t: 'me', ...me }); }
+  setAuto(state) { if (this.lobby) this.lobby.members[this.id] = { ...this.lobby.members[this.id], auto: state }; this.send({ t: 'auto', state }); }
   say(text) { this.send({ t: 'chat', text }); }
   goNow() { this.send({ t: 'go' }); }
   hold() { this.send({ t: 'hold' }); }

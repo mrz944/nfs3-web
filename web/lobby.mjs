@@ -9,6 +9,7 @@
 //   -> {t:'go'} / {t:'hold'}           owner: start now / stop or resume the countdown
 //   -> {t:'pin', id}                   owner: this player hosts (null: the site picks)
 //   -> {t:'kick', id}                  owner: out of the room for 10 minutes  <- {t:'kicked'} to them
+//   -> {t:'auto', state}               the game's autopilot (runtime/autopilot.c)  <- {t:'auto', id, state}
 //                                                                       <- {t:'phase', phase, left, held, launch}
 //   welcome carries all of it as `lobby` (lobbyState()).
 
@@ -20,7 +21,7 @@ export const TRACKS = ['Hometown', 'Redrock Ridge', 'Atlantica', 'Rocky Pass', '
 export const SPEC = [
   { key: 'type', label: 'Race', opts: [['single', 'Single Race']] },
   { key: 'track', label: 'Track', opts: TRACKS.map((t, i) => [i, t]) },
-  { key: 'laps', label: 'Laps', opts: [[2, '2'], [4, '4'], [6, '6'], [8, '8']] },
+  { key: 'laps', label: 'Laps', opts: [[2, '2'], [4, '4'], [8, '8']] },              // the online game offers 2, 4, 8
   { key: 'dir', label: 'Direction', opts: [['fwd', 'Forward'], ['back', 'Backward']] },
   { key: 'mirror', label: 'Mirrored', opts: ONOFF },
   { key: 'night', label: 'Night', opts: ONOFF },
@@ -66,7 +67,7 @@ export function changeMe(c, m) {
   Object.assign(c, out);
   return out;
 }
-export const memberView = (c) => ({ car: c.car || '', trans: c.trans || 'auto', color: c.color || 0, ready: !!c.ready, dl: c.dl ?? null, mods: !!c.mods });
+export const memberView = (c) => ({ car: c.car || '', trans: c.trans || 'auto', color: c.color || 0, ready: !!c.ready, dl: c.dl ?? null, mods: !!c.mods, auto: c.auto || 0 });
 
 // ---------------------------------------------------------------- chat
 const CHAT_KEEP = 50, CHAT_MAX = 200;
