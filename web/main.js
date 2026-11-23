@@ -1771,9 +1771,9 @@ function setupLaps() {
     const week = firsts.filter((x) => Date.now() - x.r.t < 7 * 864e5);
     const [items, title] = own.length ? [own.sort((a, b) => a.rank - b.rank || b.r.t - a.r.t), 'Your best laps']
       : week.length ? [week, 'Lap records this week'] : [firsts, 'Latest lap records'];
-    $('home-laps').hidden = !items.length;
-    $('home-laps-title').textContent = title;
-    $('home-laps-list').replaceChildren(...items.slice(0, 3).map(({ k, r, rank }) => {
+    $('home-laps-none').hidden = items.length > 0;
+    $('home-laps-title').textContent = items.length ? title : 'Lap Records';
+    $('home-laps-list').replaceChildren(...items.slice(0, 5).map(({ k, r, rank }) => {
       const [t, d] = k.split(':');
       const li = el('li', { title: 'Open this board' },
         el('span', { className: 't', textContent: `${trackName(Number(t))}${d === 'b' ? ' backward' : ''}` }),
@@ -1849,10 +1849,17 @@ function setupActivity() {
   const fmtIn = (ms) => { const m = Math.round(ms / 60e3); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
   function draw(d) {
     last = d;
-    $('live-line').textContent = d.racing + d.lobby === 0 ? 'Nobody online right now. Open a room and share the link!'
+    $('live-line').textContent = d.racing + d.lobby === 0 ? 'Nobody online right now: Quick Race opens a room and waits for others.'
       : `${d.racing} racing · ${d.lobby} in the lobby · ${d.rooms} open room${d.rooms === 1 ? '' : 's'}`;
     $('live-line').classList.toggle('on', d.racing + d.lobby > 0);
     $('live-names').replaceChildren(...d.names.map((p) => el('span', { className: 'ntag' + (p.racing ? ' racing' : ''), textContent: p.n, title: p.racing ? 'racing' : 'in the lobby' })));
+    // the Play screen: the counters and this week's most active racers
+    const led = (id, n) => $(id)?.replaceChildren(...String(Math.min(999, n || 0)).padStart(3, '0').split('').map((c) => el('i', { textContent: c })));
+    led('now-site', Math.max(d.site || 0, d.racing + d.lobby, 1));            // at least this page led('now-online', d.racing + d.lobby); led('now-rooms', d.rooms);
+    const week = (d.top?.['7d'] || []).slice(0, 5);
+    $('home-top-list')?.replaceChildren(...(week.length ? week.map((r, i) => el('li', {}, el('span', { className: 'r', textContent: i + 1 }), el('span', { className: 'n', textContent: r.n }),
+      el('span', { className: 'f', textContent: r.min >= 60 ? `${Math.floor(r.min / 60)} h ${r.min % 60} min` : `${r.min} min` })))
+      : [el('li', { className: 'muted', textContent: 'Nobody has raced this week yet.' })]));
     const rows = d.top?.[topWin] || [];
     $('top').hidden = false;                      // its own tab on Lap Records: an empty list says so
     $('top-list').replaceChildren(...(rows.length ? rows.map((r, i) => el('li', {}, el('span', { className: 'r', textContent: i + 1 }), el('span', { className: 'n', textContent: r.n }), el('span', { className: 'f', textContent: r.min >= 60 ? `${Math.floor(r.min / 60)} h ${r.min % 60} min` : `${r.min} min` })))
@@ -2009,7 +2016,9 @@ function setupChangelog(prefix) {
   const fromHash = () => { if (location.hash === '#changelog') open(); };
   window.addEventListener('hashchange', fromHash);
   fromHash();
-  load().then((d) => { if ((d.days[0]?.date || '') > seen) btn.classList.add('fresh'); }).catch(() => {});
+  load().then((d) => {
+    if ((d.days[0]?.date || '') > seen) btn.classList.add('fresh');
+  }).catch(() => {});
 }
 
 // Your Passphrase (#player): this browser's 8 words, to copy, download or keep in the browser's

@@ -87,12 +87,26 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
   .danger { display: flex; justify-content: flex-end; }
   /* the Play screen: two big buttons, the download under them, who's around, the latest records */
   .home .hero { margin: 4px 0 12px; }
-  .home .hero > * { flex: 1 1 220px; }
+  .home .hero > .heroitem { flex: 1 1 240px; display: flex; flex-direction: column; gap: 5px; }
+  .heroitem .mbtn { width: 100%; }
+  .heroitem .sub { font-size: 11px; color: var(--muted); padding-left: 12px; }
+  .pitch { margin: 0 0 12px; font-size: 13px; color: #d0daff; }
+  .homegrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .homegrid #now { grid-column: 1 / -1; }
+  @media (max-width: 760px) { .homegrid { grid-template-columns: 1fr; } }
+  .panel.mini .pb { padding-top: 10px; }
+  .panel.mini .ph .small-link { margin-left: auto; }
+  .leds { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 8px; font: 700 16px/1 var(--px); color: var(--muted); text-transform: uppercase; }
+  .leds > span { display: inline-flex; align-items: center; gap: 6px; } .leds .counter { margin-left: 0; }
+  #home-top-list { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+  #home-top-list li { display: grid; grid-template-columns: 1.6em minmax(0, 1fr) auto; gap: 8px; padding: 3px 6px; margin-bottom: 3px;
+    background: linear-gradient(90deg, #4d6dff 0 3px, rgba(40, 70, 190, .3) 3px, rgba(10, 20, 80, .15)); }
+  #home-top-list li.muted { display: block; background: none; }
+  #home-top-list .r { color: var(--muted); text-align: right; font-family: var(--px); } #home-top-list li:first-child .r { color: var(--gold); }
+  #home-top-list .n { color: #fff; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } #home-top-list .f { color: var(--ok); }
   #start:not([hidden]) ~ #play-wait, #pick-label:not([hidden]) ~ #play-wait { display: none; }
   .home #status:empty { display: none; }
-  .homeline { margin-top: 12px; padding-top: 10px; border-top: 2px solid #0e1a5c; }
-  .homeline p { margin: 4px 0; }
-  #home-laps .bar { margin-top: 12px; }
+
   .small-link { font-size: 11px; color: var(--gold); text-decoration: none; } .small-link:hover { text-decoration: underline; }
   #home-laps-list { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; }
   #home-laps-list li { display: grid; grid-template-columns: minmax(0, 1.4fr) auto minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 4px 8px; cursor: pointer;
@@ -588,11 +602,19 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
       <section class="screen" data-screen="play" aria-label="Play">
       <section class="panel home">
         <div class="pb">
+          <h2 class="sr">Play</h2>
+          <p class="pitch">The real Hot Pursuit from 1998, running right here in your browser: no install, no emulator. Outrun the cops on your own, or take on players from around the world.</p>
           <div class="hero">
-            <button id="start" class="mbtn go big" hidden>Play</button>
-            <label class="btn mbtn go big" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
-            <button id="play-wait" class="mbtn go big" disabled title="Once the game files are here">Play</button>
-            <a class="mbtn big" href="#online" id="go-online">Play Online</a>
+            <div class="heroitem">
+              <button id="start" class="mbtn go big" hidden>Play</button>
+              <label class="btn mbtn go big" id="pick-label" hidden>Choose NFS3 Folder…<input type="file" id="pick" webkitdirectory multiple></label>
+              <button id="play-wait" class="mbtn go big" disabled title="Once the game files are here">Play</button>
+              <span class="sub">Single Race · Hot Pursuit · Knockout · Tournament</span>
+            </div>
+            <div class="heroitem">
+              <a class="mbtn big" href="#online" id="go-online">Play Online</a>
+              <span class="sub">Quick Race finds you a room, up to 8 racers</span>
+            </div>
           </div>
           <p class="hint" id="pad"></p>
           <p id="status"></p>
@@ -600,17 +622,34 @@ if (location.protocol === 'http:' && /(^|\.)nfs3\.xyz$/.test(location.hostname))
           <button id="tab-here" class="small" hidden>Play here instead</button>
           <button id="pad-skip" class="small secondary" hidden>Play without the controller</button>
           <progress id="progress" max="1" value="0" hidden></progress>
-          <div class="homeline">
+        </div>
+      </section>
+      <div class="homegrid">
+        <section class="panel mini" id="now">
+          <div class="ph"><h2>Right Now</h2></div>
+          <div class="pb">
+            <div class="leds">
+              <span title="On this site right now"><span class="counter" id="now-site"><i>0</i><i>0</i><i>0</i></span>players</span>
+              <span title="In online rooms, racing or about to"><span class="counter" id="now-online"><i>0</i><i>0</i><i>0</i></span>players online</span>
+              <span title="Open online rooms"><span class="counter" id="now-rooms"><i>0</i><i>0</i><i>0</i></span>rooms</span>
+            </div>
             <p id="live-line" class="live">…</p>
             <div id="live-names"></div>
             <p id="daily" hidden></p>
           </div>
-          <div id="home-laps" hidden>
-            <div class="bar"><h3 id="home-laps-title">Lap records this week</h3><a href="#records" class="small-link">All records ›</a></div>
+        </section>
+        <section class="panel mini" id="home-laps">
+          <div class="ph"><h2 id="home-laps-title">Lap Records</h2><a href="#records" class="small-link">All ›</a></div>
+          <div class="pb">
             <ol id="home-laps-list"></ol>
+            <p id="home-laps-none" class="muted" hidden>No laps on the boards yet: finish one and it's the record.</p>
           </div>
-        </div>
-      </section>
+        </section>
+        <section class="panel mini" id="home-top">
+          <div class="ph"><h2>Most Active</h2><span class="pill">7 days</span></div>
+          <div class="pb"><ol id="home-top-list"></ol></div>
+        </section>
+      </div>
       </section>
       <section class="screen" data-screen="online" aria-label="Play Online" hidden>
       <section class="panel" id="online">

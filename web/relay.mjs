@@ -510,5 +510,6 @@ export function liveSummary() {
     if (c.state === 'game') racing++; else lobby++;
     if (r.listed) names.push({ n: c.name, racing: c.state === 'game' });
   }
-  return { racing, lobby, rooms: [...rooms.values()].filter((r) => r.listed).length, names: names.slice(0, 40) };
+  // site: pages open on this server right now (each page's socket watches the room list)
+  return { racing, lobby, site: watchers.size, rooms: [...rooms.values()].filter((r) => r.listed).length, names: names.slice(0, 40) };
 }
