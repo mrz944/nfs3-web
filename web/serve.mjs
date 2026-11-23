@@ -7,7 +7,7 @@
 // notifications 10 minutes before and at the start.
 // --staging: a closed test site (staging.nfs3.xyz, tools/staging.sh): a password page in front of
 // everything, the password in <data>/staging-password (made on first start); also noindex and a
-// STAGING ribbon on the page.
+// STAGING ribbon on the page. With --open as well: no password, only noindex and the ribbon.
 // --funnel publishes the page, WebAssembly build and configured game files publicly.
 // Also serves the online lobby/relay (WebSocket /net, relay.mjs); --relay-tcp adds a
 // raw-TCP endpoint on 127.0.0.1 for native test builds (RT_NET=127.0.0.1:PORT).
@@ -48,6 +48,8 @@ const rawArg = ri >= 0 ? args.splice(ri, 2)[1] : '';
 const rawPort = /^\d+$/.test(rawArg) ? Number(rawArg) : rawArg;   // port or Unix socket path
 const si = args.indexOf('--staging');
 const staging = si >= 0; if (staging) args.splice(si, 1);
+const oi = args.indexOf('--open');
+const closed = staging && oi < 0; if (oi >= 0) args.splice(oi, 1);     // --staging --open: no password page
 const dai = args.indexOf('--data');
 const dataDir = dai >= 0 ? resolve(args.splice(dai, 2)[1]) : null;
 if (dataDir) data = dataDir;
@@ -125,7 +127,7 @@ function statsAllowed(req, res) {
 // WebSocket, the workers and the game download pass too); the cookie is a hash of the password,
 // so changing the password file and restarting logs everyone out.
 const stagingPassword = (() => {
-  if (!staging) return '';
+  if (!closed) return '';
   const f = join(data, 'staging-password');
   try { return readFileSync(f, 'utf8').trim(); } catch {}
   const pw = randomBytes(9).toString('base64url');
@@ -309,7 +311,7 @@ const server = createServer((req, res) => {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   let url;
   try { url = new URL(req.url, 'http://x'); } catch { res.writeHead(400).end('bad request'); return; }
-  if (staging) { res.setHeader('X-Robots-Tag', 'noindex, nofollow'); if (!stagingGate(req, res, url)) return; }
+  if (staging) { res.setHeader('X-Robots-Tag', 'noindex, nofollow'); if (closed && !stagingGate(req, res, url)) return; }
   if (req.method === 'POST' && url.pathname === '/__event') {
     if (foreignOrigin(req)) { res.writeHead(403).end(); req.resume(); return; }
     analytics.handleEvent(req, res); return;
@@ -379,7 +381,7 @@ const server = createServer((req, res) => {
 // online play: WebSocket lobby/relay at /net (see relay.mjs)
 server.on('upgrade', (req, sock) => {
   let path = ''; try { path = new URL(req.url, 'http://x').pathname; } catch {}
-  if (staging && !stagingIn(req)) { sock.destroy(); return; }
+  if (closed && !stagingIn(req)) { sock.destroy(); return; }
   if (path === '/net') handleUpgrade(req, sock); else sock.destroy();
 });
 // last line of defence: a bug in a request handler is logged, not the end of every race
@@ -389,7 +391,7 @@ if (rawPort) listenRaw(rawPort);
 server.listen(port, '127.0.0.1', () => {
   console.log(`NFS3 web runtime: http://localhost:${port}/` + (gameDir ? `  (game folder: ${gameDir}, automatic download)` : ''));
   console.log(`stats:            http://localhost:${port}/__stats  (password: ${process.env.NFS3_STATS_PASSWORD ? '$NFS3_STATS_PASSWORD' : dataDir ? join(data, 'stats-password') : 'build/stats-password'})`);
-  if (staging) console.log(`staging:          closed with a password (${join(data, 'staging-password')})`);
+  if (staging) console.log(closed ? `staging:          closed with a password (${join(data, 'staging-password')})` : 'staging:          open (no password), not indexed');
   if (daily) console.log(`daily race:       ${daily.time} (server time), next ${new Date(daily.next()).toString().slice(0, 21)}; ${push.count} push subscriber(s)`);
   if (funnel && ![443, 8443, 10000].includes(tsPort)) { console.error('Funnel only works on ports 443, 8443 and 10000'); process.exit(1); }
   if (tsPort) startTailscale();

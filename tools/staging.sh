@@ -1,13 +1,14 @@
 #!/bin/sh
-# Staging site for the online-lobby branch: staging.nfs3.xyz, port 8098, its own data, closed
-# with a password. Run from the staging worktree (~/DEV/nfs3-webgl-staging); see
+# Staging site for the online-lobby branch: staging.nfs3.xyz, port 8098, its own data, kept out
+# of search engines, open or closed with a password. Run from the staging worktree (~/DEV/nfs3-webgl-staging); see
 # docs/web-lobby-plan.md, section 8. Each part is started by hand:
 #
 #   tools/staging.sh setup         once: copies of the live game build and mods, the same game
 #                                  files source (R2), links to gen/ and game/ (read only), the
 #                                  TURN key
 #   tools/staging.sh tunnel-setup  once: the Cloudflare tunnel "nfs3-staging" and the DNS name
-#   tools/staging.sh server        the staging server (Ctrl+C stops it)
+#   tools/staging.sh server        the staging server, open to anyone with the address (Ctrl+C stops it)
+#   tools/staging.sh server --password   the same, closed with a password page
 #   tools/staging.sh tunnel        the tunnel to it (Ctrl+C stops it)
 #   tools/staging.sh password      the testers' password
 #
@@ -55,7 +56,8 @@ EOF
   echo "tunnel $NAME ($id) -> $HOST -> 127.0.0.1:$PORT"
   ;;
 server)
-  exec node web/serve.mjs "$PORT" --staging
+  if [ "$2" = "--password" ]; then exec node web/serve.mjs "$PORT" --staging; fi
+  exec node web/serve.mjs "$PORT" --staging --open
   ;;
 tunnel)
   exec "$cf" tunnel --no-autoupdate --config build/cloudflare/config.yml run
