@@ -152,7 +152,7 @@ void gpu_publish(GFrame *f) {
                 float p[3], v, w[3]; memcpy(p, G + car + 0x98, 12); memcpy(&v, G + car + 0xb8, 4); memcpy(w, G + car + 0xd8, 12); w[1] = atan2f(w[0], w[2]);   /* heading from the forward row */
                 k += snprintf(b + k, sizeof b - k, " %d:(%.2f,%.2f,%.2f %.1f w%.4f)", i, p[0], p[1], p[2], v, w[1]);
             }
-            rt_log("cars%s", b);
+            rt_log("cars @%.3f%s", fmod(now_s(), 1000.0), b);   /* the machine's clock: two games on one machine line up */
         }
     }
     static int fps_log = -1; if (fps_log < 0) fps_log = getenv("RT_FPS_LOG") != NULL;
