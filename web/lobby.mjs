@@ -14,8 +14,9 @@
 //   welcome carries all of it as `lobby` (lobbyState()).
 
 // The game's online race settings, as its lobby menus offer them (game/fedata/menus/mainmult.mnu,
-// location.mnu, opponent.mnu, level.mnu; names from fedata/text/text.eng). [value, label] pairs;
-// the first is the default. To be checked against the running game (plan, Phase 0).
+// location.mnu, opponent.mnu, level.mnu; their lists in nfs3.exe's table at 0x5563e8, see
+// runtime/autopilot.c, which puts them into the host's game). [value, label] pairs; the first is
+// the default.
 const ONOFF = [[0, 'Off'], [1, 'On']];
 export const TRACKS = ['Hometown', 'Redrock Ridge', 'Atlantica', 'Rocky Pass', 'Country Woods', 'Lost Canyons', 'Aquatica', 'The Summit', 'Empire City'];
 export const SPEC = [
@@ -28,9 +29,9 @@ export const SPEC = [
   { key: 'weather', label: 'Weather', opts: ONOFF },
   { key: 'cls', label: 'Car class', opts: [['any', 'Any class'], ['A', 'Class A'], ['B', 'Class B'], ['C', 'Class C']] },
   { key: 'opp', label: 'AI opponents', opts: [['none', 'None'], ['one', 'One'], ['full', 'Full grid']] },
-  { key: 'oppSkill', label: 'AI skill', opts: [['beginner', 'Beginner'], ['expert', 'Expert']] },
-  { key: 'oppCar', label: 'AI car', opts: [['random', 'Random']], car: true },
-  { key: 'traffic', label: 'Traffic', opts: [['none', 'None'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']] },
+  { key: 'oppSkill', label: 'AI skill', opts: [['normal', 'Normal'], ['aggressive', 'Aggressive']] },
+  { key: 'oppCar', label: 'AI cars', opts: [['A', 'Class A'], ['B', 'Class B'], ['C', 'Class C']] },
+  { key: 'traffic', label: 'Traffic', opts: [['off', 'Off'], ['on', 'On']] },
   { key: 'aBrake', label: 'Braking assist', opts: ONOFF, assist: true },
   { key: 'aCollision', label: 'Collision recovery', opts: ONOFF, assist: true },
   { key: 'aTraction', label: 'Traction assist', opts: ONOFF, assist: true },

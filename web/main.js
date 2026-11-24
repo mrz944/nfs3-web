@@ -1213,8 +1213,8 @@ const AUTO = { OFF: 0, MENUS: 1, CREATED: 2, JOINED: 3, READY: 4, RACING: 5, LOB
 function autoBegin(mod) {
   if (!autoPlan || !mod?._rt_auto_start) { if (autoPlan) log('auto: this game build has no autopilot'); autoPlan = null; return; }
   autoHold = true; autoGoAt = 0;
-  mod.ccall('rt_auto_start', null, ['number', 'number', 'string'], [autoPlan.role, autoPlan.seats, autoPlan.role === 1 ? autoPlan.race : '']);
-  log(`auto: ${autoPlan.role === 1 ? 'hosting' : 'joining'} the room's race (${autoPlan.seats} players${autoPlan.role === 1 ? ', ' + autoPlan.race : ''})`);
+  mod.ccall('rt_auto_start', null, ['number', 'number', 'string'], [autoPlan.role, autoPlan.seats, autoPlan.race]);
+  log(`auto: ${autoPlan.role === 1 ? 'hosting' : 'joining'} the room's race (${autoPlan.seats} players, ${autoPlan.race})`);
 }
 function autoText(s) {
   const host = autoPlan?.role === 1 ? null : net.peers.get(autoPlan?.host)?.name || 'the host';
@@ -1633,9 +1633,18 @@ function setupOnline() {
     const l = e.detail, r = l.race || {};
     log(`online: the room starts the race, host ${l.host === net.id ? 'me' : net.peers.get(l.host)?.name}`);
     // the game's autopilot walks its menus with this (runtime/autopilot.c)
+    // the game's list positions (runtime/autopilot.c): class A, B, C, unlimited; none, one, full
+    // grid; normal, aggressive; AI cars none, class A, B, C; traffic on, off; gearbox manual, automatic
+    const pos = (v, list) => Math.max(0, list.indexOf(v));
+    const my = net.lobby?.members?.[net.id] || {};
+    const race = [`track=${r.track | 0}`, `laps=${r.laps | 0}`, `back=${r.dir === 'back' ? 1 : 0}`, `mirror=${r.mirror ? 1 : 0}`, `night=${r.night ? 1 : 0}`, `weather=${r.weather ? 1 : 0}`,
+      `cls=${pos(r.cls, ['A', 'B', 'C', 'any'])}`, `opp=${pos(r.opp, ['none', 'one', 'full'])}`, `skill=${pos(r.oppSkill, ['normal', 'aggressive'])}`,
+      `aicar=${pos(r.oppCar, ['none', 'A', 'B', 'C']) || 1}`, `traffic=${r.traffic === 'on' ? 0 : 1}`,
+      `abrake=${r.aBrake ? 1 : 0}`, `acoll=${r.aCollision ? 1 : 0}`, `atrac=${r.aTraction ? 1 : 0}`, `aline=${r.aLine ? 1 : 0}`, `anav=${r.aNav ? 1 : 0}`];
+    const me = [...(my.car ? [`car=${my.car}`] : []), `trans=${my.trans === 'manual' ? 0 : 1}`, `color=${my.color | 0}`];
     autoPlan = {
       role: l.host === net.id ? 1 : 2, seats: l.seats.length, host: l.host, launch: l.id,
-      race: `track=${r.track | 0},laps=${r.laps | 0},back=${r.dir === 'back' ? 1 : 0},mirror=${r.mirror ? 1 : 0},night=${r.night ? 1 : 0},weather=${r.weather ? 1 : 0}`,
+      race: (l.host === net.id ? [...race, ...me] : me).join(','),
     };
     // (the Ready click earlier counts for the sound; fullscreen needs a click of its own: Alt+Enter)
     if (!gameStarted && gameHere && !$('start').disabled && !$('start').hidden) $('start').click();

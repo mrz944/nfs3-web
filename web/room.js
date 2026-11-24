@@ -129,7 +129,7 @@ export function setupRoom(d) {
     }
     box.append(main, el('details', { className: 'assists' }, el('summary', { textContent: 'Driving assists' }), assists));
     const owner = l.owner === net.id ? 'You set up the race.' : `${nameOf(l.owner)} sets up the race.`;
-    $('race-note').textContent = `${owner} Track, laps, direction, mirrored, night and weather go into the game; class, AI, traffic and assists are coming.`;
+    $('race-note').textContent = `${owner} The race starts by itself when the countdown ends, with these settings and each player's own car.`;
   }
   function drawCar() {
     const sel = $('my-car');
