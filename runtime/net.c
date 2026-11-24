@@ -148,8 +148,17 @@ void net_deliver(const uint8_t src[6], const uint8_t *p, int len) {
  * 6 bytes), then count x (car, 88 bytes). They go to the whole room, and a room can hold
  * two races at once (two hosts, each with its own players: the game keeps their packets
  * apart): states from another race than ours are ignored, or its cars would be pulled to
- * places on another track. */
+ * places on another track.
+ *
+ * Two players are different: the game sends no bundles then. Each machine sends its own
+ * controls packet (06 00 + 4 bytes) straight to the other and waits for the other's, so both
+ * games are held in lockstep by each other. Which one hosts comes from the game (MY_INDEX:
+ * 0 on the host, the player's number on a client), and then the same rules apply: each game
+ * is the authority for its own car, the host for the AI cars, and the steady beat paces the
+ * other player's controls on both machines (a late one gets a stand-in), so a hitch on one
+ * machine no longer freezes the other. */
 #define CAR_TABLE 0x5efac8u
+#define MY_INDEX 0x7a2278u                /* the game's own player number (16 bits): 0 = the host, -2 while joining */
 #define CAR_STATE 0x98u
 #define CAR_BYTES 88
 #define SYNC_PORT 0x7ea5
@@ -157,6 +166,9 @@ static int sync_on = -1;
 static int my_slot = -1;                  /* client: my block in the bundles (learned) */
 static int am_host, am_client;           /* seen: clients' controls coming in / bundles coming in */
 static double last_race_pkt;             /* a bundle or controls packet: a race is on */
+static int duo;                          /* a two-player race: controls packets both ways, no bundles */
+static double my_ctl_t;                  /* when this game last sent its own controls packet */
+static int my_index(void) { return (int16_t)RD16(MY_INDEX); }
 static uint8_t my_ctl[4]; static uint8_t sent_ctl[256][4]; static double sent_t[256];
 static int slot_votes[8], votes_n;
 static double rtt_s = 0.1;               /* host: round trip to the clients (min over recent acks) */
@@ -216,10 +228,12 @@ static uint32_t car_ptr(int k) {
 /* a game packet going out (game thread) */
 static void sync_out(const uint8_t *d, int n) {
     if (!sync_enabled() || !is_dat(d, n)) return;
-    if (n == 16 && d[10] == 0x06) {          /* my controls (I'm a client) */
+    if (n == 16 && d[10] == 0x06) {          /* my controls (a client; or either player of two) */
         pthread_mutex_lock(&sync_mu);
-        memcpy(my_ctl, d + 12, 4); memcpy(sent_ctl[d[6]], d + 12, 4); sent_t[d[6]] = tnow();
-        am_client = 1; last_race_pkt = tnow();
+        double now = tnow();
+        memcpy(my_ctl, d + 12, 4); memcpy(sent_ctl[d[6]], d + 12, 4); sent_t[d[6]] = now;
+        my_ctl_t = now; last_race_pkt = now;
+        if (my_index() == 0) am_host = 1; else am_client = 1;   /* a host sends its controls only in a two-player race */
         pthread_mutex_unlock(&sync_mu);
     } else if (n == 43 && d[10] == 0x06) {   /* a bundle (I'm the host) */
         bundle_t[d[6]] = tnow();
@@ -230,10 +244,20 @@ static void sync_in(const uint8_t src[6], uint8_t *d, int n) {
     if (!sync_enabled() || !is_dat(d, n)) return;
     pthread_mutex_lock(&sync_mu);
     double now = tnow();
-    if (n == 16 && d[10] == 0x06) {          /* a client's controls: its ack tells the round trip */
-        am_host = 1; last_race_pkt = now;
-        double t = bundle_t[d[7]];
-        if (t > 0 && now - t < 1.0) { double r = now - t; rtt_s = r < rtt_s ? r : rtt_s + (r - rtt_s) * 0.02; }
+    if (n == 16 && d[10] == 0x06) {          /* another player's controls: a client's to the host, or the other of two */
+        last_race_pkt = now;
+        int two = now - my_ctl_t < 1.0;       /* we send ours too: two players */
+        if (two && !duo) { duo = 1; rt_log("net: two-player race, I'm %s (player %d)", my_index() == 0 ? "the host" : "a client", my_index()); }
+        if (my_index() == 0) {                /* the host: the ack tells the round trip */
+            am_host = 1;
+            double t = two ? sent_t[d[7]] : bundle_t[d[7]];
+            if (t > 0 && now - t < 1.0) { double r = now - t; rtt_s = r < rtt_s ? r : rtt_s + (r - rtt_s) * 0.02; }
+        } else if (two) {                     /* a client of two: this is the host */
+            am_client = 1;
+            memcpy(race_host, src, 6); race_host_known = 1;
+            int k = my_index();
+            if (my_slot < 0 && k > 0 && k < 8) { my_slot = k; rt_log("net: smoother play on, my car is %d", my_slot); }
+        }
     } else if (n == 43 && d[10] == 0x06) {   /* a bundle */
         am_client = 1; last_race_pkt = now;
         memcpy(race_host, src, 6); race_host_known = 1;
@@ -245,7 +269,7 @@ static void sync_in(const uint8_t src[6], uint8_t *d, int n) {
             if (hits == 1) slot_votes[hit]++;
             if (++votes_n >= 8) {
                 int best = 1; for (int k = 2; k < 8; k++) if (slot_votes[k] > slot_votes[best]) best = k;
-                if (slot_votes[best] >= 6) { my_slot = best; rt_log("net: smoother play on, my car is %d", my_slot); }
+                if (slot_votes[best] >= 6) { my_slot = best; rt_log("net: smoother play on, my car is %d (the game's player %d)", my_slot, my_index()); }
                 memset(slot_votes, 0, sizeof slot_votes); votes_n = 0;
             }
         }
@@ -293,7 +317,7 @@ void net_frame(void) {
     if (now - last_race_pkt > 0.5) {
         if (now - last_race_pkt > 5.0 && (am_host || am_client)) {   /* race over: learn again next time */
             pthread_mutex_lock(&sync_mu);
-            my_slot = -1; am_host = am_client = 0; race_host_known = 0; memset(human_seen, 0, sizeof human_seen); memset(sent_t, 0, sizeof sent_t);
+            my_slot = -1; am_host = am_client = 0; duo = 0; my_ctl_t = 0; race_host_known = 0; memset(human_seen, 0, sizeof human_seen); memset(sent_t, 0, sizeof sent_t);
             pthread_mutex_unlock(&sync_mu);
             pace_log();
         }
@@ -380,7 +404,8 @@ void net_frame(void) {
  * silent longer than pace_standin does the game wait, as it always did.
  *
  * It runs on the clients only (the host's stream is the one with bundles), on that
- * stream only: another player's own numbered messages pass untouched.
+ * stream only: another player's own numbered messages pass untouched. In a two-player
+ * race it runs on both machines, on the other player's stream of controls packets.
  *
  * Numbering: the game sees our own sequence (pq_v), one per packet handed on,
  * stand-ins included, so a stand-in never collides with a real message that
@@ -420,6 +445,11 @@ static int unacked(uint8_t r) { return (pq_unacked[r >> 3] >> (r & 7)) & 1; }
 static void set_unacked(uint8_t r) { pq_unacked[r >> 3] |= (uint8_t)(1 << (r & 7)); }
 static void clr_unacked(uint8_t r) { pq_unacked[r >> 3] &= (uint8_t)~(1 << (r & 7)); }
 static int is_bundle(const uint8_t *p, int len) { return len == 47 && p[14] == 0x06; }
+static int is_ctl(const uint8_t *p, int len) { return len == 20 && p[14] == 0x06; }    /* one player's controls */
+static int pq_duo;                        /* the stream is the other player's controls (two players), not bundles */
+static int is_beat(const uint8_t *p, int len) { return pq_duo ? is_ctl(p, len) : is_bundle(p, len); }
+/* a stream that may start here: the host's bundles, or (two players: we send ours) the other's controls */
+static int starts_stream(const uint8_t *p, int len) { return is_bundle(p, len) || (is_ctl(p, len) && tnow() - my_ctl_t < 1.0); }
 static void pace_reset(void) { memset(pq, 0, sizeof pq); memset(pq_seen, 0, sizeof pq_seen); memset(pq_unacked, 0, sizeof pq_unacked); pq_on = 0; pq_last_len = 0; pq_head = 0; pq_stalled = 0; pq_rate_on = 0; }
 static void pace_start(uint8_t r, double now) {
     pace_reset(); pq_on = 1; pq_rrel = r; pq_v = r; pq_rlast = SEQ(r - 1); pq_ack_cur = r; pq_t = now + pace_buf; pq_buf = pace_buf; pq_late_t = 0;
@@ -490,17 +520,17 @@ static int pace_take(const uint8_t src[6], const uint8_t *p, int len) {
     /* only the host's stream, from its first bundle on (so never on the host itself, and never
      * another player's own numbered messages) */
     if (pq_on && tnow() - pq_arrival <= 2.0) { if (memcmp(src, pq_src, 6)) return 0; }
-    else if (!is_bundle(p, len)) return 0;
+    else if (!starts_stream(p, len)) return 0;
     uint8_t r = SEQ(p[10]); double now = tnow();
     pthread_mutex_lock(&pq_mu);
     static int started; if (!started) { started = 1; pthread_t t; pthread_create(&t, NULL, pace_main, NULL); }
-    if (!pq_on || now - pq_arrival > 2.0) { pace_start(r, now); memcpy(pq_src, src, 6); }   /* a new stream */
+    if (!pq_on || now - pq_arrival > 2.0) { pace_start(r, now); memcpy(pq_src, src, 6); pq_duo = !is_bundle(p, len); }   /* a new stream */
     trace_pkt("in>", src, (uint16_t)(p[0] << 8 | p[1]), (uint16_t)(p[2] << 8 | p[3]), p + 4, len - 4);
     pq_arrival = now;
     if (seen(r)) { pstat.dup++; pthread_mutex_unlock(&pq_mu); return 1; }  /* resent: we had it (or a stand-in did) */
     set_seen(r); set_unacked(r);
     if (((p[11] - pq_last_ack) & 0x7f) < 64 || !pstat.real) pq_last_ack = SEQ(p[11]);
-    if (!is_bundle(p, len)) {                                                /* a reliable message: on it goes, with our next number */
+    if (!is_beat(p, len)) {                                                  /* a reliable message: on it goes, with our next number */
         uint8_t out[MAXPKT + 4]; memcpy(out, p, (size_t)len);
         if (((r - pq_rlast) & 0x7f) < 64) pq_rlast = r;
         renumber(out, len); pstat.msgs++;
