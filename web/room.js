@@ -272,10 +272,19 @@ export function setupRoom(d) {
     const h = hostGuess();
     $('best-host').textContent = h ? `Host: ${h.id === net.id ? 'you' : nameOf(h.id)} (${h.why})` : '';
   }
+  // The chat stays scrolled to its newest line unless the player scrolled up to read. Out of
+  // sight (another screen, the game in front) the box has no size and forgets where it was, so
+  // it scrolls down again once it has one.
+  let chatDown = true;
+  const chatBox = $('chat-lines');
+  const chatEnd = () => { chatBox.scrollTop = chatBox.scrollHeight; };
+  chatBox.addEventListener('scroll', () => {
+    if (chatBox.clientHeight) chatDown = chatBox.scrollTop + chatBox.clientHeight >= chatBox.scrollHeight - 8;
+  });
+  try { new ResizeObserver(() => { if (chatDown && chatBox.clientHeight) chatEnd(); }).observe(chatBox); } catch {}
   function drawChat() {
-    const box = $('chat-lines'), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
-    box.replaceChildren(...(L()?.chat || []).map(chatLine));
-    if (atEnd) box.scrollTop = box.scrollHeight;
+    chatBox.replaceChildren(...(L()?.chat || []).map(chatLine));
+    if (chatDown) chatEnd();
   }
   const muted = new Set(); try { for (const p of JSON.parse(localStorage.getItem('nfs3.muted') || '[]')) muted.add(p); } catch {}
   function chatLine(line) {
@@ -314,6 +323,7 @@ export function setupRoom(d) {
     }
     $('chat-note').hidden = true;
     net.say(v); sentAt = now; sentText = v; inp.value = '';
+    chatDown = true; chatEnd();
   }
   $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
   $('chat-in').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); } });
