@@ -4,7 +4,12 @@
   "days": [
     { "date": "2026-11-26", "items": [
       ["fixed", "Lap Records: laps driven under a name another player already has were lost without a word. They count now, under your own name or a new PlayerNNNN, and the page says the name is taken."],
-      ["improved", "Your name: a reminder to keep your passphrase until you've copied, downloaded or saved it. It turns red when the browser hasn't promised to keep the site's data, since then the passphrase is the only way back to your name and lap records."]
+      ["improved", "Your name: a reminder to keep your passphrase until you've copied, downloaded or saved it. It turns red when the browser hasn't promised to keep the site's data, since then the passphrase is the only way back to your name and lap records."],
+      ["fixed", "Online: when the host paused a race for more than a few seconds, the race never carried on and the other players were sent back to the menus. A pause ends now. Everyone in the room needs to reload for it."]
+    ] },
+    { "date": "2026-11-20", "items": [
+      ["fixed", "Controllers: the button setup went back to the defaults whenever the game started before the browser saw the controller. It's kept now."],
+      ["improved", "Controllers: once you've played with one in a browser, Start waits for you to press a button on it (or Play without the controller), instead of giving you a second to do it."]
     ] },
     { "date": "2026-11-18", "items": [
       ["fixed", "Lap Records: watching a downloaded replay in the game counted its laps as yours. Replays don't count now, and those times are off the boards."],
