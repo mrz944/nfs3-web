@@ -204,7 +204,8 @@ export function createPlayers(dir, { now = Date.now, watch = true } = {}) {
           reply(res, 200, pub(r.pl, { claimed: true })); return;
         }
         session(pl, m.s);
-        reply(res, 200, pub(pl)); return;
+        // a player without a name yet: whose the browser's name is (the page says if it's taken)
+        reply(res, 200, pub(pl, pl.n ? {} : { state: m.n ? nameState(m.n, pl.p).state : 'free' })); return;
       }
       if (path === '/__name') {
         const r = use(m.k, m.n, ip);

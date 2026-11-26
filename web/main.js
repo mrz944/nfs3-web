@@ -1436,8 +1436,24 @@ function nameHint(state, pre = '') {
   const h = $('name-hint'); if (!h) return;
   if (!playersOn || !NAME_HINTS[state]) { h.hidden = true; return; }
   const [cls, text] = NAME_HINTS[state];
+  showNameHint(cls, `${pre ? pre + ' ' : ''}${text}`, 'Use on another device');
+}
+function showNameHint(cls, text, link) {
+  const h = $('name-hint'); if (!h) return;
   h.className = 'namehint ' + cls; h.hidden = false;
-  h.replaceChildren(document.createTextNode(`${pre ? pre + ' ' : ''}${text} `), Object.assign(document.createElement('a'), { href: '#player', textContent: 'Use on another device' }));
+  h.replaceChildren(document.createTextNode(text + ' '), Object.assign(document.createElement('a'), { href: '#player', textContent: link }));
+}
+// The name field never keeps another player's name: the game would show it and the lap records
+// wouldn't (laps.mjs counts the laps under the player's own name). A player with a name goes back
+// to it; one without gets a new PlayerNNNN (or the one the server gave it). The hint says so,
+// until the name changes again.
+let stand_in = '';                // the PlayerNNNN a browser without a player was given (kept)
+function nameTaken(asked, own = '') {
+  const f = $('pname');
+  const n = own || me.n || (stand_in ||= randomName());
+  if (f && f.value.trim() !== n) { f.value = n; try { localStorage.setItem('nfs3.name', n); } catch {} }
+  log(`name: ${asked} is another player's name, racing as ${n}`);
+  showNameHint('bad', `${asked} is already taken by another player, so your laps count as ${n}. Pick another name, or if ${asked} is yours, enter its passphrase:`, 'Use on another device');
 }
 // the server's word on our player ({p, n}): the name field follows it
 function playerIs(r, why = '') {
@@ -1447,7 +1463,7 @@ function playerIs(r, why = '') {
   const f = $('pname');
   if (r.n && f && f.value.trim() !== r.n) { f.value = r.n; try { localStorage.setItem('nfs3.name', r.n); } catch {} }
   if (changed) { log(`player ${r.p} ${r.n}${why ? ` (${why})` : ''}`); document.dispatchEvent(new Event('nfs3-player')); }
-  nameHint('yours');
+  if (r.n) nameHint('yours');
 }
 
 function setupOnline() {
@@ -1468,7 +1484,9 @@ function setupOnline() {
     const r = await playerApi('__me', { k: me.k, n: myName(), s: logSession });
     if (!r) return;
     playersOn = true;
-    if (r.p) playerIs(r, r.claimed ? 'took the lap records from before under this name' : '');
+    if (r.p && r.n) { playerIs(r, r.claimed ? 'took the lap records from before under this name' : ''); return; }
+    if (r.p) playerIs(r);              // a player without a name yet: r.state is about the field's name
+    if (r.state === 'taken') nameTaken(myName());
     else nameHint(r.state);
   });
   let checkTimer = 0;
@@ -1490,8 +1508,10 @@ function setupOnline() {
     if (!r) return;
     if (r.error) {
       log(`name: ${n} not taken (${r.error})`);
-      if (r.p) playerIs(r);          // back to the name the player has (no player yet: the field keeps what was typed)
-      nameHint(r.error, `${n}:`); return;
+      if (r.p) playerIs(r);          // back to the name the player has
+      if (r.error === 'taken') nameTaken(n, r.n);
+      else nameHint(r.error, `${n}:`);
+      return;
     }
     playerIs(r, r.claimed ? 'took the lap records from before under this name' : 'new name');
   });
@@ -1665,6 +1685,8 @@ function reportLap(track, flags, code, lap, laps, ticks) {
       const d = await r.json().catch(() => null);
       if (!r.ok) { log(`lap records: not sent (${d?.error === 'taken' ? `${n} is another player's name` : d?.error || r.status})`); return; }
       if (d?.p) { playerIs(d); race.sent++; try { localStorage.setItem('nfs3.lapAt', String(Date.now())); } catch {} }
+      // the name was another player's: the lap counts under this player's own name (laps.mjs)
+      if (d?.taken && d?.n) { log(`lap records: sent as ${d.n} (${d.taken} is another player's name)`); nameTaken(d.taken, d.n); }
       if (d?.best) log('lap records: a new best lap for', d?.n || n);
     }).catch(() => {});
 }
