@@ -388,6 +388,15 @@ void net_frame(void) {
  * the next of our numbers. The game's acks name our numbers, so on the way out
  * they are translated back (pq_vmap) to the newest of the host's numbers the game
  * really had, which is what the host's resend logic wants to know.
+ * Our numbers run ahead of the host's: every stand-in takes one, also the few handed
+ * on after the host's last bundle of a race, and the slot of each reliable message gets
+ * one too. So the translation stays on after the race (translating, below): the host's
+ * messages keep getting our numbers and the game's acks keep being translated, and the
+ * next race goes on from our numbers. Handing the host's own numbers to the game again
+ * after a race (as before) made the game take the host's next messages for ones it had
+ * already had: it dropped them, and waited. A knockout's next race never started ("waiting
+ * for players"), and a pause of more than a few seconds never ended. A stream whose
+ * numbers don't follow on (a new connection) starts afresh.
  * RT_PACE=buffer_ms[:standin_ms] (default 40:250, 0 = off). */
 #define PQ 128                            /* the numbers run 0..127 */
 #define SEQ(x) ((uint8_t)((x) & 0x7f))
@@ -401,6 +410,8 @@ static int pace_on = -1; static double pace_buf = 0.040, pace_standin = 0.250;
 #define PACE_BUF_MAX 0.160
 static volatile int pq_on;                /* a stream is on */
 static uint8_t pq_src[6];                 /* whose: the host's node (the one that sends bundles) */
+static int tr_on; static uint8_t tr_src[6];   /* translating: the game has our numbers for this host's stream (pq_v,
+                                           * pq_vmap, pq_rlast, pq_seen, pq_unacked, pq_ack_cur), races and between them */
 static uint8_t pq_rrel;                   /* the host's next bundle to hand on */
 static uint8_t pq_v;                      /* our number the game expects next */
 static uint8_t pq_vmap[PQ];               /* our number -> the newest of the host's the game had by then */
@@ -420,9 +431,16 @@ static int unacked(uint8_t r) { return (pq_unacked[r >> 3] >> (r & 7)) & 1; }
 static void set_unacked(uint8_t r) { pq_unacked[r >> 3] |= (uint8_t)(1 << (r & 7)); }
 static void clr_unacked(uint8_t r) { pq_unacked[r >> 3] &= (uint8_t)~(1 << (r & 7)); }
 static int is_bundle(const uint8_t *p, int len) { return len == 47 && p[14] == 0x06; }
-static void pace_reset(void) { memset(pq, 0, sizeof pq); memset(pq_seen, 0, sizeof pq_seen); memset(pq_unacked, 0, sizeof pq_unacked); pq_on = 0; pq_last_len = 0; pq_head = 0; pq_stalled = 0; pq_rate_on = 0; }
-static void pace_start(uint8_t r, double now) {
-    pace_reset(); pq_on = 1; pq_rrel = r; pq_v = r; pq_rlast = SEQ(r - 1); pq_ack_cur = r; pq_t = now + pace_buf; pq_buf = pace_buf; pq_late_t = 0;
+static void pace_reset(void) { memset(pq, 0, sizeof pq); pq_on = 0; pq_last_len = 0; pq_head = 0; pq_stalled = 0; pq_rate_on = 0; }
+/* r: does the host's number follow on from the ones we had (or is it a new connection)? */
+static int follows(uint8_t r) { return ((r - pq_rlast) & 0x7f) < 64; }
+static void pace_start(uint8_t r, double now, const uint8_t src[6]) {
+    pace_reset(); pq_on = 1; pq_rrel = r; pq_t = now + pace_buf; pq_buf = pace_buf; pq_late_t = 0;
+    memcpy(pq_src, src, 6);
+    if (tr_on && !memcmp(src, tr_src, 6) && follows(r)) return;            /* the same host's stream goes on: our numbers too */
+    tr_on = 1; memcpy(tr_src, src, 6);                                      /* afresh: the game's numbers are the host's */
+    memset(pq_seen, 0, sizeof pq_seen); memset(pq_unacked, 0, sizeof pq_unacked);
+    pq_v = r; pq_rlast = SEQ(r - 1); pq_ack_cur = r;
     for (int i = 0; i < PQ; i++) pq_vmap[i] = (uint8_t)i;
 }
 /* our number onto a packet for the game, and what its ack will mean */
@@ -488,17 +506,22 @@ static int pace_take(const uint8_t src[6], const uint8_t *p, int len) {
     }
     if (!pace_on || !sync_enabled() || len > MAXPKT + 4 || !is_dat(p + 4, len - 4) || p[9] == 0 || !memcmp(src, self_node, 6)) return 0;
     /* only the host's stream, from its first bundle on (so never on the host itself, and never
-     * another player's own numbered messages) */
-    if (pq_on && tnow() - pq_arrival <= 2.0) { if (memcmp(src, pq_src, 6)) return 0; }
-    else if (!is_bundle(p, len)) return 0;
+     * another player's own numbered messages), and between races the host whose numbers the
+     * game has from us (translating) */
     uint8_t r = SEQ(p[10]); double now = tnow();
+    int bundle = is_bundle(p, len);
     pthread_mutex_lock(&pq_mu);
+    int stream = pq_on && now - pq_arrival <= 2.0, ours = tr_on && !memcmp(src, tr_src, 6);
+    if (stream ? memcmp(src, pq_src, 6) != 0 : !bundle && !ours) { pthread_mutex_unlock(&pq_mu); return 0; }
+    if (!stream && !bundle && !seen(r) && !follows(r)) {                   /* a new connection: the host's numbers again */
+        tr_on = 0; pthread_mutex_unlock(&pq_mu); return 0;
+    }
     static int started; if (!started) { started = 1; pthread_t t; pthread_create(&t, NULL, pace_main, NULL); }
-    if (!pq_on || now - pq_arrival > 2.0) { pace_start(r, now); memcpy(pq_src, src, 6); }   /* a new stream */
+    if (bundle && !stream) pace_start(r, now, src);                        /* a new stream */
     trace_pkt("in>", src, (uint16_t)(p[0] << 8 | p[1]), (uint16_t)(p[2] << 8 | p[3]), p + 4, len - 4);
-    pq_arrival = now;
+    if (bundle || stream) pq_arrival = now;
     if (seen(r)) { pstat.dup++; pthread_mutex_unlock(&pq_mu); return 1; }  /* resent: we had it (or a stand-in did) */
-    set_seen(r); set_unacked(r);
+    set_seen(r); set_unacked(r); clr_seen(SEQ(r + 64));
     if (((p[11] - pq_last_ack) & 0x7f) < 64 || !pstat.real) pq_last_ack = SEQ(p[11]);
     if (!is_bundle(p, len)) {                                                /* a reliable message: on it goes, with our next number */
         uint8_t out[MAXPKT + 4]; memcpy(out, p, (size_t)len);
@@ -514,7 +537,7 @@ static int pace_take(const uint8_t src[6], const uint8_t *p, int len) {
         pstat.late++; pq_late_t = now; if (pq_buf < PACE_BUF_MAX) pq_buf += 0.010;
         pthread_mutex_unlock(&pq_mu); return 1;
     }
-    if (d > 32) { pace_start(r, now); memcpy(pq_src, src, 6); }           /* the stream jumped: start again */
+    if (d > 32) pace_start(r, now, src);                                   /* the stream jumped: start again */
     else {                                                                   /* the host's beat: 32 numbers' worth of arrivals at a time (jitter averages out) */
         if (!pq_rate_on) { pq_rate_on = 1; pq_rate_t = now; pq_rate_seq = r; }
         int n = (r - pq_rate_seq) & 0x7f;
@@ -531,7 +554,7 @@ static int pace_take(const uint8_t src[6], const uint8_t *p, int len) {
 }
 /* a packet out to the host: the game's ack names our number; the host wants its own */
 static void pace_out(const uint8_t *dst, uint8_t *d, int n) {
-    if (!pq_on || memcmp(dst, pq_src, 6) || !is_dat(d, n)) return;
+    if (!tr_on || memcmp(dst, tr_src, 6) || !is_dat(d, n)) return;
     uint8_t ack = pq_vmap[SEQ(d[7])];                /* what the game means, in the host's numbers */
     pthread_mutex_lock(&pq_mu);
     for (int k = 0; k < PQ; k++) {                   /* but first every number we got and never named */
