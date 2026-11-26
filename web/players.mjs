@@ -136,12 +136,26 @@ export function createPlayers(dir, { now = Date.now, watch = true } = {}) {
     if (st.state === 'old') { write({ ev: 'legacy', p: pl.p, n: st.n }); claimed = true; }
     return { ok: true, n: st.n, claimed };
   }
-  // a request with a key: its player, made (and named) if needed
-  function use(token, name, ip, { make = true } = {}) {
+  // a free PlayerNNNN (the page's own default names look the same)
+  function freeName() {
+    for (let i = 0; ; i++) {
+      const n = 'Player' + (i < 50 ? 1000 + randomBytes(2).readUInt16BE() % 9000 : 10000 + randomBytes(4).readUInt32BE() % 90000);
+      if (nameState(n).state === 'free') return n;
+    }
+  }
+  // a request with a key: its player, made (and named) if needed. fallback: a player without a
+  // name asking for another player's name gets a free PlayerNNNN instead (taken: the name it
+  // asked for), so its laps aren't lost (laps.mjs; the page says the name is taken)
+  function use(token, name, ip, { make = true, fallback = false } = {}) {
     let pl = byToken(token);
     if (!pl && make) pl = create(token, ip);
     if (!pl) return { error: TOKEN.test(token || '') && make ? 'busy' : 'unknown' };
-    if (!pl.n) { const r = setName(pl, name); if (r.error) return { pl, error: r.error }; return { pl, named: r }; }
+    if (!pl.n) {
+      const r = setName(pl, name);
+      if (r.error === 'taken' && fallback) { const f = setName(pl, freeName()); if (!f.error) return { pl, named: f, taken: cleanName(name) }; }
+      if (r.error) return { pl, error: r.error };
+      return { pl, named: r };
+    }
     return { pl };
   }
   const seenSessions = new Set();
@@ -218,7 +232,7 @@ export function createPlayers(dir, { now = Date.now, watch = true } = {}) {
 
   Object.defineProperty(api, 'version', { get: () => version });   // laps.mjs: rebuild the boards when it changes
   return Object.assign(api, {
-    file, dir, handle, nameState, setName, use, create, session, resolve, byToken, pub, write,
+    file, dir, handle, nameState, setName, use, create, session, resolve, byToken, pub, write, freeName,
     // the player of a public id (after merges), its current name, the owner of an old name
     get: (p) => S.byId.get(resolve(p)) || null,
     nameOf: (p) => S.byId.get(resolve(p))?.n || '',

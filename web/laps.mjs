@@ -125,10 +125,14 @@ export function createLaps(dir, players) {
       if (!n || badName(n) || !int(m.track, 0, 63) || !int(m.f, 0, 31) || !int(m.lap, 1, 8) || !int(m.laps, 0, 99)
           || !int(m.ticks, MIN_TICKS, MAX_TICKS) || typeof m.car !== 'string' || !/^[a-z0-9]{1,4}$/.test(m.car)) { res.writeHead(400).end(); return; }
       const send = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(o)); };
-      let p = null;
+      let p = null, taken = null;
       if (TOKEN.test(m.k || '')) {
-        const u = players.use(m.k, n, ip);
+        // another player's name doesn't lose the lap: it counts under this player's own name
+        // (a new player gets a free PlayerNNNN, players.mjs use), and the page says so
+        const u = players.use(m.k, n, ip, { fallback: true });
         if (u.error) { send(u.error === 'busy' ? 429 : 409, { error: u.error }); return; }
+        if (u.taken) taken = u.taken;
+        else if (foldName(u.pl.n) !== foldName(n) && players.nameState(n, u.pl.p).state === 'taken') taken = n;
         p = u.pl.p; n = u.pl.n;
         players.session(u.pl, m.s);
       } else if (players.nameState(n).state === 'taken') { send(409, { error: 'taken' }); return; }
@@ -139,7 +143,7 @@ export function createLaps(dir, players) {
       keep(r);
       const copy = race && copies.get(race);
       if (copy) console.log(`[laps] ${n}: race ${race} is a replay of race ${copy} (lap ${r.lap}), not counted`);
-      send(200, { best: !copy && (!had || r.ticks < had.r.ticks), ...(p ? { p, n } : {}) });
+      send(200, { best: !copy && (!had || r.ticks < had.r.ticks), ...(p ? { p, n } : {}), ...(taken ? { taken } : {}) });
     });
   }
 
