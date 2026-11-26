@@ -6,6 +6,8 @@
 //                                                    that player (a racer's earlier name, asked for in Discord)
 //   node tools/players.mjs rename <name|id> <new>    no limits, even a name another player holds
 //   node tools/players.mjs forget <name|id>          delete the player (its laps leave the boards)
+//   node tools/players.mjs merge <from> <into>       <from> (name|id) joins <into>: its laps, replays and key are
+//                                                    <into>'s; <into> takes <from>'s name if it has none of its own
 //   --data DIR: the server's data folder (default: build/)
 //
 // Changes are appended to build/players/players.jsonl; a running serve.mjs reads them within
@@ -58,11 +60,22 @@ if (cmd === 'who' && a) {
   const pl = find(a), was = pl.n, r = players.setName(pl, b, { admin: true });
   if (r.error) { console.error(`Not renamed: ${r.error}`); process.exit(1); }
   console.log(`${was} (${pl.p}) is ${r.n} now.`);
+} else if (cmd === 'merge' && a && b) {
+  // a racer who lost a browser's data (and its passphrase) and raced on as a new player
+  const from = find(a), into = find(b), name = from.n;
+  if (from === into) { console.error(`${a} and ${b} are the same player.`); process.exit(1); }
+  players.write({ ev: 'merge', p: into.p, from: from.p });
+  let also = '';
+  if (!into.n && name) {             // the merge frees <from>'s name: <into> takes it
+    const r = players.setName(into, name, { admin: true });
+    also = r.error ? `; taking the name ${name} didn't work (${r.error})` : `, and is called ${r.n} now`;
+  }
+  console.log(`${name || '(no name)'} (${from.p}) joined ${into.n || '(no name)'} (${into.p})${also}.`);
 } else if (cmd === 'forget' && a) {
   const pl = find(a);
   players.write({ ev: 'forget', p: pl.p });
   console.log(`Deleted ${pl.n} (${pl.p}).`);
 } else {
-  console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(0, 12).join('\n'));
+  console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(0, 14).join('\n'));
   process.exit(cmd ? 1 : 0);
 }
