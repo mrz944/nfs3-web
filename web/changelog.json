@@ -2,6 +2,10 @@
   "game": "NFS III",
   "about": "What changed on nfs3.xyz, day by day. Kinds: new, improved, fixed. Days run 05:00 to 05:00 Polish time. tools/discord/changelog.mjs posts them to Discord.",
   "days": [
+    { "date": "2026-11-26", "items": [
+      ["fixed", "Lap Records: laps driven under a name another player already has were lost without a word. They count now, under your own name or a new PlayerNNNN, and the page says the name is taken."],
+      ["improved", "Your name: a reminder to keep your passphrase until you've copied, downloaded or saved it. It turns red when the browser hasn't promised to keep the site's data, since then the passphrase is the only way back to your name and lap records."]
+    ] },
     { "date": "2026-11-18", "items": [
       ["fixed", "Lap Records: watching a downloaded replay in the game counted its laps as yours. Replays don't count now, and those times are off the boards."],
       ["fixed", "Lap Records: races driven while waiting in an online room sent no laps, and Instant steering was off in them. They count now, like any race on your own."],
