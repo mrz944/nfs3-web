@@ -1464,6 +1464,20 @@ function playerIs(r, why = '') {
   if (r.n && f && f.value.trim() !== r.n) { f.value = r.n; try { localStorage.setItem('nfs3.name', r.n); } catch {} }
   if (changed) { log(`player ${r.p} ${r.n}${why ? ` (${why})` : ''}`); document.dispatchEvent(new Event('nfs3-player')); }
   if (r.n) nameHint('yours');
+  keepHint();
+}
+// Keep the passphrase: a browser that loses its site data (cleared, or a browser that doesn't keep
+// it for good) loses its player, and only the 8 words bring it back. Shown under the name until
+// the words were copied, downloaded or saved once (setupPlayer).
+const PP_KEPT = 'nfs3.ppKept';
+async function keepHint() {
+  const h = $('pp-hint'); if (!h) return;
+  let kept = false; try { kept = !!localStorage.getItem(PP_KEPT); } catch {}
+  if (kept || !me.p || !me.n || !me.words) { h.hidden = true; return; }
+  const lasting = await navigator.storage?.persisted?.().catch(() => true) ?? true;
+  h.className = 'namehint' + (lasting ? '' : ' bad'); h.hidden = false;
+  h.replaceChildren(document.createTextNode(`Keep your passphrase somewhere safe: it's the only way back to ${me.n} and its lap records if this browser loses its data${lasting ? '' : " (this browser hasn't promised to keep this site's data)"}. `),
+    Object.assign(document.createElement('a'), { href: '#player', textContent: 'Show my passphrase' }));
 }
 
 function setupOnline() {
@@ -1970,14 +1984,18 @@ function setupPlayer() {
     }
   }
   const text = () => `nfs3.xyz passphrase of ${name()}\n\n${me.words}\n\nOn another phone or computer: nfs3.xyz > Your name > Use on another device, then enter these words to race there as ${name()}, with your lap records.\nKeep them to yourself: anyone who has them can race as you.\n`;
-  $('pl-copy').onclick = () => navigator.clipboard?.writeText(me.words).then(() => note('Copied.'), () => note('Copying didn\'t work here: select the words and copy them.'));
+  // the words were kept somewhere: the reminder under the name goes (keepHint)
+  const kept = () => { try { localStorage.setItem(PP_KEPT, '1'); } catch {} keepHint(); };
+  $('pl-copy').onclick = () => navigator.clipboard?.writeText(me.words).then(() => { note('Copied.'); kept(); }, () => note('Copying didn\'t work here: select the words and copy them.'));
+  $('pl-words').addEventListener('copy', kept);
   $('pl-download').onclick = () => {
+    kept();
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([text()], { type: 'text/plain' })), download: 'nfs3-passphrase.txt' });
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   };
   // Chrome, Edge: into the browser's own passwords, which sync to the player's other devices
   $('pl-save').onclick = async () => {
-    try { await navigator.credentials.store(new window.PasswordCredential({ id: name(), name: name(), password: me.words })); note('Saved in the browser\'s passwords (if it asked, and you said yes).'); }
+    try { await navigator.credentials.store(new window.PasswordCredential({ id: name(), name: name(), password: me.words })); note('Saved in the browser\'s passwords (if it asked, and you said yes).'); kept(); }
     catch (e) { note(`The browser didn't save it (${e.name}). Copy the words instead.`); }
   };
   $('pl-in').addEventListener('input', () => {
@@ -1995,15 +2013,18 @@ function setupPlayer() {
     const who = await playerApi('__me', { k, s: logSession });
     if (!who) { msg('The server didn\'t answer. Try again in a moment.'); return; }
     if (!who.p) { msg('No player has this passphrase. Check the words.'); return; }
-    const bring = me.p && me.p !== who.p && $('pl-bring').checked, was = name();
+    // (was: the player's own name; the field may hold a name it never had)
+    const bring = me.p && me.p !== who.p && $('pl-bring').checked, was = me.n || 'this browser';
     if (bring) {
       const m = await playerApi('__merge', { k, from: me.k, s: logSession });
       if (!m?.p) { msg('Bringing the lap records along didn\'t work. Try again in a moment.'); return; }
     }
     await setKey(words);
+    try { localStorage.setItem(PP_KEPT, '1'); } catch {}      // typed in from somewhere: it is kept
     playerIs(who, `passphrase from another device${bring ? `, with the lap records of ${was}` : ''}`);
     draw(); $('pl-in').value = ''; $('pl-read').textContent = '';
-    msg(`This browser now races as ${who.n}${bring ? `, with ${was}'s lap records` : ''}.`, true);
+    const as = who.n || 'that player';
+    msg(`This browser now races as ${as}${bring ? `, with ${was === 'this browser' ? "this browser's" : `${was}'s`} lap records` : ''}.${who.n ? '' : ' It has no name yet: pick one under Your name.'}`, true);
   });
   $('pl-forget').addEventListener('click', async (e) => {
     e.preventDefault();
