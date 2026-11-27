@@ -141,9 +141,23 @@ static void mode_label(void) {
     if (!memcmp(G + MODE_LABEL, orig, sizeof orig)) { memcpy(G + MODE_LABEL, now, sizeof now); rt_log("game: display modes labelled 32-bit"); }
 }
 
+/* The graphics the game starts with, once: from config.dat, or without one the defaults
+ * 0x472d10 picks from the machine's rating 0x5652a4 (0..5, see x86_cpuid in core.c; 4 and up
+ * is full detail). Lists 0 = most: car detail, view distance, horizon, effects; on/off: car
+ * shading, chrome, projected textures (1 = projected); the screen size (0x7fff7fff = biggest). */
+static void graphics_log(void) {
+    static int done;
+    if (done || !RD32(0x6fbc18u)) return;
+    done = 1;
+    rt_log("game: machine rating %u%s; car detail %u, view %u, horizon %u, effects %u, shading %u, chrome %u, projected %u, screen %#x",
+           RD32(0x5652a4u), (RD8(0x7a3a58u) & 2) ? " (halved)" : "", RD32(0x6fbc1cu), RD32(0x6fbc28u), RD32(0x6fbc2cu),
+           RD32(0x6fbc30u), RD32(0x6fbc20u), RD32(0x6fbc24u), RD32(0x6fbc3cu), RD32(0x6fbc18u));
+}
+
 void game_frame(void) {
     { extern void autopilot_frame(void); autopilot_frame(); }   /* the online race's menus (autopilot.c) */
     mode_label();
+    graphics_log();
     instant_steering();
     lap_watch();
     static int locked = -1;

@@ -362,10 +362,15 @@ void x86_int(CPU *c, uint32_t addr, uint32_t n) {
     x86_trap(c, addr, "software interrupt");
 }
 void x86_cpuid(CPU *c) {
-    /* Pentium II-class: FPU, TSC, CX8, CMOV, MMX. No SSE: the game predates it. */
+    /* An Intel family 6: FPU, TSC, CX8, CMOV, SSE, SSE2, SSE3; no MMX, so MMX paths stay off.
+     * The only cpuid is nfs3.exe's 0x50ea85, for 0x4f1c70: it rates the machine 0..5 (0x5652a4)
+     * as family 6 + MMX + SSE + SSE2 + SSE3, and nothing else reads the SSE bits. The rating
+     * picks the graphics defaults when there is no config.dat yet (0x472d10): from 4 up, full
+     * detail in the biggest screen size, as on any PC of the last 20 years. (0x49616f clamps it
+     * to 1..3 for 0x495bc0.) */
     switch (c->r[EAX]) {
     case 0: c->r[EAX] = 1; c->r[EBX] = 0x756E6547; c->r[EDX] = 0x49656E69; c->r[ECX] = 0x6C65746E; break;
-    case 1: c->r[EAX] = 0x652; c->r[EBX] = 0; c->r[ECX] = 0; c->r[EDX] = 0x0000A111; break; /* FPU TSC CX8 CMOV; no MMX so MMX paths stay off */
+    case 1: c->r[EAX] = 0x652; c->r[EBX] = 0; c->r[ECX] = 0x00000001; c->r[EDX] = 0x0600A111; break;
     default: c->r[EAX] = c->r[EBX] = c->r[ECX] = c->r[EDX] = 0;
     }
 }
