@@ -303,6 +303,22 @@ class Client {
       if (!Object.keys(out).length) return;
       for (const c of this.room.members.values()) c.json({ t: 'me', id: this.id, ...memberView(this) });
       if (!!this.ready !== was) { say(this.room, `${this.name} is ${this.ready ? 'ready' : 'not ready'}.`); recount(this.room, this.ready); roomsChanged(); }
+    } else if (m.t === 'name' && this.id) {
+      // a new name while in the room: a player with a key gets the name its key has now (set over
+      // /__name), anyone else the one sent, if it's allowed and not another player's
+      let n;
+      if (players && this.p) n = players.nameOf(this.p);
+      else {
+        n = cleanName(m.name);
+        if (!n || badName(n) || (players && players.nameState(n).state === 'taken')) return;
+      }
+      if (!n || n === this.name) return;
+      const old = this.name;
+      this.name = n; if (this.p) this.playerName = n;
+      if (this.room.ownerId === this.id) this.room.owner = n;
+      for (const c of this.room.members.values()) c.json({ t: 'name', id: this.id, name: n });
+      say(this.room, `${old} is now ${n}.`);
+      roomsChanged();
     } else if (m.t === 'auto' && this.id) {
       const st = Number(m.state);
       if (!Number.isInteger(st) || st < 0 || st > 9 || st === this.auto) return;

@@ -200,6 +200,7 @@ export class Net extends EventTarget {
       this.emit('lobby');
       if (m.launch && m.launch.id !== was && m.launch.seats.includes(this.id)) this.emit('launch', m.launch);
     } else if (m.t === 'kicked') { this.emit('log', 'removed from the room by its owner'); this.lostAt = 0; this.dropRoom(); this.emit('kicked'); this.emit('status'); }
+    else if (m.t === 'name') { const p = this.peers.get(m.id); if (p) p.name = m.name; this.emit('status'); }
     else if (m.t === 'state') { const p = this.peers.get(m.id); if (p) { p.state = m.state; this.emit('status'); } }
     else if (m.t === 'signal') this.onSignal(m.from, m.data);
     else if (m.t === 'pong') { this.relayRtt = performance.now() - m.ts; if (this.id) this.shareRtts(); this.emit('status'); }
@@ -235,6 +236,7 @@ export class Net extends EventTarget {
   setMe(me) { this.send({ t: 'me', ...me }); }
   setAuto(state) { if (this.lobby) this.lobby.members[this.id] = { ...this.lobby.members[this.id], auto: state }; this.send({ t: 'auto', state }); }
   say(text) { this.send({ t: 'chat', text }); }
+  rename(name) { if (this.id) this.send({ t: 'name', name }); }
   goNow() { this.send({ t: 'go' }); }
   hold() { this.send({ t: 'hold' }); }
   pin(id) { this.send({ t: 'pin', id }); }

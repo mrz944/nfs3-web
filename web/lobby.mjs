@@ -9,6 +9,7 @@
 //   -> {t:'go'} / {t:'hold'}           owner: start now / stop or resume the countdown
 //   -> {t:'pin', id}                   owner: this player hosts (null: the site picks)
 //   -> {t:'kick', id}                  owner: out of the room for 10 minutes  <- {t:'kicked'} to them
+//   -> {t:'name', name}                a new name (relay.mjs)            <- {t:'name', id, name}
 //   -> {t:'auto', state}               the game's autopilot (runtime/autopilot.c)  <- {t:'auto', id, state}
 //                                                                       <- {t:'phase', phase, left, held, launch}
 //   welcome carries all of it as `lobby` (lobbyState()).

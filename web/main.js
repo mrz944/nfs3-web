@@ -1541,7 +1541,8 @@ function setupOnline() {
   });
   name.addEventListener('change', async () => {
     const n = myName();
-    if (!playersOn || !me.k || !n || n === me.n) return;
+    // in a room, the others see the new name (the relay takes a key's name from the key's player)
+    if (!playersOn || !me.k || !n || n === me.n) { if (n) net.rename(n); return; }
     clearTimeout(checkTimer);
     const r = await playerApi('__name', { k: me.k, n, s: logSession });
     if (!r) return;
@@ -1551,6 +1552,7 @@ function setupOnline() {
       nameHint(r.error, `${n}:`); return;
     }
     playerIs(r, r.claimed ? 'took the lap records from before under this name' : 'new name');
+    net.rename(r.n);
   });
   // rooms: the relay gets the key too, and plays us under our player's name
   net.player = () => me.ready.then(() => (me.k ? { k: me.k, s: logSession } : null));
