@@ -114,6 +114,33 @@ static uint32_t b_GetStatus(CPU *c, const uint32_t *a) {
     WR32(A(1), st);
     return DS_OK;
 }
+/* The game's sound writer (eacsnd, on the game's sound thread) locks the streaming buffer every
+ * ~8 ms and fills it ~30 ms ahead of the play cursor. Held up longer than that (a busy or
+ * throttled browser), the cursor plays what is still there from 400 ms before, and afterwards
+ * the writer stays ahead by its 30 ms plus the hold-up (up to ~320 ms; it caps there): every sound
+ * comes that much late until the game restarts. Measured natively with RT_DS_STALL=<s>:<ms> (one
+ * hold-up of the writer at <s> s); RT_LOCK_LOG=<n> logs the first n locks. The log says when it
+ * happens, and the minute line (web_audio_main) has the writer's lead. */
+static unsigned writer_gaps, writer_gap_worst_ms, writer_lead_ms;
+static void writer_lock(DSBuf *b, uint32_t off, uint32_t n) {
+    static double stall_at = -1; static int stall_ms, nlog, nl = -1; static uint64_t t_start, last;
+    if (stall_at < 0) {
+        const char *e = getenv("RT_DS_STALL"); stall_at = e ? atof(e) : 1e30; stall_ms = e && strchr(e, ':') ? atoi(strchr(e, ':') + 1) : 0;
+        nl = getenv("RT_LOCK_LOG") ? atoi(getenv("RT_LOCK_LOG")) : 0; t_start = now_ns();
+    }
+    if (stall_ms && (double)(now_ns() - t_start) / 1e9 >= stall_at) { rt_log("audio: test hold-up of the sound writer, %d ms", stall_ms); rt_usleep((unsigned)stall_ms * 1000); stall_ms = 0; }
+    uint64_t t = now_ns();
+    pthread_mutex_lock(&ds_mu); uint32_t pp = play_pos(b); pthread_mutex_unlock(&ds_mu);
+    uint32_t lead = (off + b->size - pp) % b->size;
+    writer_lead_ms = (unsigned)((uint64_t)lead * 1000 / b->bytes_per_sec);
+    if (last && t - last > 100000000ull) {
+        unsigned ms = (unsigned)((t - last) / 1000000ull);
+        writer_gaps++; if (ms > writer_gap_worst_ms) writer_gap_worst_ms = ms;
+        if (nlog++ < 20) rt_log("audio: the game's sound writer was held up %u ms (sound may come late from now on)", ms);
+    }
+    last = t;
+    if (nl > 0) { nl--; rt_log("lock size %u off %u n %u play %u lead %u", b->size, off, n, pp, lead); }
+}
 static uint32_t b_Lock(CPU *c, const uint32_t *a) {
     DSBuf *b = buf_of(A(0));
     uint32_t off = A(1), n = A(2), flags = A(7);
@@ -121,6 +148,7 @@ static uint32_t b_Lock(CPU *c, const uint32_t *a) {
     if (flags & 1) { uint32_t w; pthread_mutex_lock(&ds_mu); w = play_pos(b); pthread_mutex_unlock(&ds_mu); off = w; } /* FROMWRITECURSOR */
     if (!b->size) return DSERR_GENERIC;
     off %= b->size; if (n > b->size) n = b->size;
+    if (!b->primary && !(flags & 3) && b->playing && b->bytes_per_sec) writer_lock(b, off, n);
     uint32_t n1 = n, n2 = 0;
     if (off + n > b->size) { n1 = b->size - off; n2 = n - n1; }
     WR32(A(3), b->mem + off); WR32(A(4), n1);
@@ -349,9 +377,10 @@ static void *web_audio_main(void *unused) {
             if (sk - skew0 > 2000000 || skew0 - sk > 2000000) rt_log("audio: sound clock %+.3f%% against the wall clock (speaker pace)", (double)(sk - skew0) / (double)(t - stat_t) * -100.0);
             skew0 = sk; drops_min += drops; lates = drops = 0; late_max = 0; stat_t = t;
             static int tick; if (++tick % 6 == 0) {                    /* once a minute: how the sound went */
-                rt_log("audio: last minute: buffer %u..%u frames, clock %+.3f%%, %u drops, %u resyncs (worst %u ms)",
-                       lv_min == UINT32_MAX ? 0 : lv_min, lv_max, (double)(sk - skew_min) / 60e9 * -100.0, drops_min, resyncs, resync_worst_ms);
-                lv_min = UINT32_MAX; lv_max = 0; skew_min = sk; drops_min = 0; resyncs = 0; resync_worst_ms = 0;
+                rt_log("audio: last minute: buffer %u..%u frames, clock %+.3f%%, %u drops, %u resyncs (worst %u ms), writer %u ms ahead, %u hold-ups (worst %u ms)",
+                       lv_min == UINT32_MAX ? 0 : lv_min, lv_max, (double)(sk - skew_min) / 60e9 * -100.0, drops_min, resyncs, resync_worst_ms,
+                       writer_lead_ms, writer_gaps, writer_gap_worst_ms);
+                lv_min = UINT32_MAX; lv_max = 0; skew_min = sk; drops_min = 0; resyncs = 0; resync_worst_ms = 0; writer_gaps = 0; writer_gap_worst_ms = 0;
             }
         }
         rt_usleep(2000);                                               /* RT_TICK_MS: wakes like a browser on Windows */
