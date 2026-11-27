@@ -69,6 +69,7 @@ export function setupRoom(d) {
   let cars = null;                    // gameCars()
   let mine = { car: '', trans: 'auto', color: 0 };
   try { Object.assign(mine, JSON.parse(localStorage.getItem('nfs3.car') || '{}')); } catch {}
+  if (mine.pick === undefined && mine.car) { mine.pick = mine.car; mine.pickColor = mine.color; }   // the car the player chose (fixCar)
   const saveMine = () => { try { localStorage.setItem('nfs3.car', JSON.stringify(mine)); } catch {} };
   let mods = false;
 
@@ -87,10 +88,17 @@ export function setupRoom(d) {
     const key = (c) => carName(c).replace(/^\W+/, '');
     return all.filter((c) => cls === 'any' || !cars || cars[c].cls === cls).sort((a, b) => key(a).localeCompare(key(b)));
   }
+  // the car must be in the room's class (the owner can change it any time): else the player's own
+  // pick when the class allows it again, else a default
   function fixCar(send = true) {
     const ok = allowed();
     let changed = false;
-    if (!ok.includes(mine.car)) { mine.car = ['diab', 'fm50', 'f355', 'corv', 'jxk8'].find((c) => ok.includes(c)) || ok[0] || ''; mine.color = 0; changed = true; }
+    if (!ok.includes(mine.car)) {
+      const was = mine.car;
+      mine.car = [mine.pick, 'diab', 'fm50', 'f355', 'corv', 'jxk8'].find((c) => c && ok.includes(c)) || ok[0] || '';
+      mine.color = mine.car === mine.pick ? mine.pickColor || 0 : 0; changed = true;
+      if (was && mine.car && was !== mine.car) d.log?.(`room: ${carName(was)} is not in ${optLabel('cls', L()?.race?.cls)}, racing the ${carName(mine.car)}`);
+    } else if (mine.pick && mine.car !== mine.pick && ok.includes(mine.pick)) { mine.car = mine.pick; mine.color = mine.pickColor || 0; changed = true; }
     const n = cars?.[mine.car]?.colors.length || 0;
     if (n && mine.color >= n) { mine.color = 0; changed = true; }
     if (changed) saveMine();
@@ -141,7 +149,7 @@ export function setupRoom(d) {
     const cols = cars?.[mine.car]?.colors || [];
     $('my-colors').replaceChildren(...cols.map((c, i) => {
       const b = el('button', { type: 'button', className: 'sw' + (i === mine.color ? ' on' : ''), title: `Colour ${i + 1}`, ariaLabel: `Colour ${i + 1}`, ariaPressed: String(i === mine.color) }, swatch(c));
-      b.onclick = () => { mine.color = i; saveMine(); net.setMe({ color: i }); drawCar(); };
+      b.onclick = () => { mine.color = i; if (mine.car === mine.pick) mine.pickColor = i; saveMine(); net.setMe({ color: i }); drawCar(); };
       return b;
     }));
     $('my-colors-none').hidden = cols.length > 0;
@@ -287,7 +295,7 @@ export function setupRoom(d) {
   }
 
   // ---- inputs
-  $('my-car').onchange = () => { mine.car = $('my-car').value; mine.color = 0; saveMine(); net.setMe({ car: mine.car, color: 0 }); drawCar(); };
+  $('my-car').onchange = () => { mine.car = mine.pick = $('my-car').value; mine.color = mine.pickColor = 0; saveMine(); net.setMe({ car: mine.car, color: 0 }); drawCar(); };
   $('my-trans').onchange = () => { mine.trans = $('my-trans').value; saveMine(); net.setMe({ trans: mine.trans }); };
   $('ready-btn').onclick = () => { const r = !memberOf(net.id).ready; fixCar(); net.setMe({ ready: r }); };
   $('go-now').onclick = () => net.goNow();
@@ -310,7 +318,8 @@ export function setupRoom(d) {
   $('chat-form').addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
   $('chat-in').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); } });
 
-  net.addEventListener('lobby', () => { if (net.id && !memberOf(net.id).car) fixCar(); draw(); });
+  // a new class from the owner may rule out the car (the classes are known once the files are read)
+  net.addEventListener('lobby', () => { if (net.id && (cars || !memberOf(net.id).car)) fixCar(); draw(); });
   net.addEventListener('status', draw);
   net.addEventListener('chat', (e) => { drawChat(); overlay(e.detail); });
   net.addEventListener('kicked', () => d.message?.('The room\'s owner removed you from the room.'));

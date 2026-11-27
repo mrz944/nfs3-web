@@ -1624,7 +1624,7 @@ function setupOnline() {
   const redraw = () => { drawRooms(); drawRoom(); };
   // the room as the race's lobby: race settings, cars, Ready, countdown, chat (room.js)
   const room = setupRoom({
-    net, $, el, flagged, pingClass, myName, gameDir, message,
+    net, $, el, flagged, pingClass, myName, gameDir, message, log,
     gameReady: () => gameHere,
     modsOn: async () => (await moddedPaths(await gameDir())).size > 0,
     gameRunning: () => gameStarted,
