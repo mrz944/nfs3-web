@@ -130,7 +130,7 @@ static void report(int s) {
 }
 
 /* ---------------------------------------------------------------- the race's settings
- * "track=4,laps=4,back=0,mirror=0,night=1,weather=0,cls=3,opp=0,skill=0,aicar=1,traffic=1,
+ * "type=0,track=4,laps=4,back=0,mirror=0,night=1,weather=0,cls=3,opp=0,skill=0,aicar=1,traffic=1,
  * abrake=0,acoll=0,atrac=0,aline=0,anav=0" (the host's), "car=diab,trans=1,color=2" (everyone's).
  * The race's are the game's lists (the table at 0x5563e8: name, items, variable), each value the
  * position in its list: classLimiter 0x6fd504 (A, B, C, unlimited), oppnumber 0x6fd4d0 (none,
@@ -148,6 +148,16 @@ static void apply_race(void) {
     for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
         char *eq = strchr(tok, '='); if (!eq) continue; *eq = 0;
         int v = atoi(eq + 1);
+        if (!strcmp(tok, "type")) {
+            /* the race type (racetype 0x6fd3b8: 0 single, 1 tournament, 2 knockout, 3 hot pursuit)
+             * and the lobby's list of them (multracetype 0x5556d8: single, hot pursuit, knockout
+             * beginner/expert, tournament beginner/expert), which 0x440390/0x440160 keep in step.
+             * In Hot Pursuit the AI opponent settings don't count: the players race, AI cops chase
+             * (tested natively 2026-11-28, Hometown and Empire City). */
+            uint32_t t = v == 3 ? 3u : 0u;
+            WR32(0x6fd3b8u, t); WR32(0x5556d8u, t == 3 ? 1u : 0u);
+            continue;
+        }
         if (!strcmp(tok, "laps")) {
             int idx = v >= 8 ? 2 : v >= 4 ? 1 : 0;
             WR16(0x6fd4b0u, (uint16_t)idx); WR32(0x6fd4b4u, (uint32_t)(idx == 2 ? 8 : idx == 1 ? 4 : 2));
@@ -333,7 +343,7 @@ void autopilot_frame(void) {
         rt_log("auto: menu %s", m[0] ? m : "(none)"); snprintf(last, sizeof last, "%s", m);
         if (!strcmp(m, "pause") && role > 0)                         /* the race is loaded */
         {
-            rt_log("auto: racing track=%u laps=%u back=%u mirror=%u night=%u weather=%u class=%u opp=%u skill=%u aicar=%u traffic=%u", RD32(0x6fd4acu), RD32(0x6fd4b4u),
+            rt_log("auto: racing type=%u track=%u laps=%u back=%u mirror=%u night=%u weather=%u class=%u opp=%u skill=%u aicar=%u traffic=%u", RD32(0x6fd3b8u), RD32(0x6fd4acu), RD32(0x6fd4b4u),
                    RD32(0x6fd4c0u), RD32(0x6fd4c4u), RD32(0x6fd4c8u), RD32(0x6fd4ccu), RD32(0x6fd504u), RD32(0x6fd4d0u), RD32(0x6fd4f0u), RD32(0x6fd4d4u), RD32(0x6fd4e8u));
             char w[200]; int k = 0;                                  /* the lobby's players: car, gearbox (records at 0x79f5f8, 0x60 each) */
             for (int i = 0; i < (int16_t)RD16(0x7a2276u) && i < 8; i++) k += snprintf(w + k, sizeof w - (size_t)k, "[%d: car %u gearbox %u] ", i, RD8(0x79f604u + 0x60u * (uint32_t)i), RD8(0x79f605u + 0x60u * (uint32_t)i));

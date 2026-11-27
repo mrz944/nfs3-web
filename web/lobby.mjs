@@ -21,7 +21,7 @@
 const ONOFF = [[0, 'Off'], [1, 'On']];
 export const TRACKS = ['Hometown', 'Redrock Ridge', 'Atlantica', 'Rocky Pass', 'Country Woods', 'Lost Canyons', 'Aquatica', 'The Summit', 'Empire City'];
 export const SPEC = [
-  { key: 'type', label: 'Race', opts: [['single', 'Single Race']] },
+  { key: 'type', label: 'Race', opts: [['single', 'Single Race'], ['pursuit', 'Hot Pursuit']] },   // Hot Pursuit: AI cops, no AI racers
   { key: 'track', label: 'Track', opts: TRACKS.map((t, i) => [i, t]) },
   { key: 'laps', label: 'Laps', opts: [[2, '2'], [4, '4'], [8, '8']] },              // the online game offers 2, 4, 8
   { key: 'dir', label: 'Direction', opts: [['fwd', 'Forward'], ['back', 'Backward']] },
@@ -120,7 +120,7 @@ export function lobbyState(room) {
 }
 // the browser's line about a room: the race, how many are ready, what's going on
 export const roomRace = (room) => ({
-  phase: room.phase, ready: others(room).filter((c) => c.ready).length,
+  phase: room.phase, ready: others(room).filter((c) => c.ready).length, type: room.race.type,
   track: room.race.track, laps: room.race.laps, dir: room.race.dir, mirror: room.race.mirror, night: room.race.night, weather: room.race.weather, cls: room.race.cls,
 });
 

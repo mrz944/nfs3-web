@@ -13,6 +13,7 @@ const CAR_NAMES = {
   peln: 'Pursuit El Niño', scig: 'Italdesign Scighera', sl60: 'Mercedes SL600', sr42: 'Spectre R42', vcop: 'Pursuit Corvette', walm: "'98 Indy 500 Pace Car",
 };
 const CLASS = ['A', 'B', 'C'];
+const NOT_IN_PURSUIT = ['opp', 'oppSkill', 'oppCar'];    // Hot Pursuit: the players and AI cops, no AI racers
 export const carName = (c) => CAR_NAMES[c] || String(c || '').toUpperCase();
 
 // ---------------------------------------------------------------- the game's cars
@@ -117,13 +118,14 @@ export function setupRoom(d) {
     const own = net.isOwner && (l.phase === 'waiting' || l.phase === 'countdown');
     const r = l.race;
     $('race-track').textContent = optLabel('track', r.track);
-    $('race-sub').textContent = [`${r.laps} laps`, r.dir === 'back' ? 'Backward' : '', r.mirror ? 'Mirrored' : '', r.night ? 'Night' : '', r.weather ? 'Weather' : '', r.cls !== 'any' ? optLabel('cls', r.cls) : ''].filter(Boolean).join(' · ');
+    $('race-sub').textContent = [r.type === 'pursuit' ? 'Hot Pursuit' : '', `${r.laps} laps`, r.dir === 'back' ? 'Backward' : '', r.mirror ? 'Mirrored' : '', r.night ? 'Night' : '', r.weather ? 'Weather' : '', r.cls !== 'any' ? optLabel('cls', r.cls) : ''].filter(Boolean).join(' · ');
     const box = $('race-opts');
     // keep the open select (a redraw while choosing would close it)
     if (box.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
     box.textContent = '';
     const main = el('div', { className: 'ropts' }), assists = el('div', { className: 'ropts' });
     for (const s of l.spec) {
+      if (r.type === 'pursuit' && NOT_IN_PURSUIT.includes(s.key)) continue;
       let opts = s.opts;
       if (s.car) opts = [...s.opts, ...allowed().map((c) => [c, carName(c)])];
       const sel = el('select', { disabled: !own, title: own ? '' : 'The room\'s owner sets up the race' });

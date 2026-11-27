@@ -1599,7 +1599,8 @@ function setupOnline() {
       // the race the room is set up for, and what it's doing (lobby.mjs roomRace)
       const g = r.race, race = el('td', { className: 'race' });
       if (g) {
-        race.append(el('b', { textContent: trackName(g.track) }), ` · ${g.laps} laps`,
+        race.append(...(g.type === 'pursuit' ? [el('span', { className: 'tag race', textContent: 'Hot Pursuit' }), ' '] : []),
+          el('b', { textContent: trackName(g.track) }), ` · ${g.laps} laps`,
           el('br'), [g.dir === 'back' && 'Backward', g.mirror && 'Mirrored', g.night && 'Night', g.weather && 'Weather', g.cls && g.cls !== 'any' && `Class ${g.cls}`].filter(Boolean).join(' · '));
         if (!r.racing && g.ready) race.append(el('div', { className: 'ready', textContent: `■ ${g.ready} ready${g.phase === 'countdown' ? ', starting soon' : ''}` }));
       }
@@ -1639,7 +1640,7 @@ function setupOnline() {
     // grid; normal, aggressive; AI cars none, class A, B, C; traffic on, off; gearbox manual, automatic
     const pos = (v, list) => Math.max(0, list.indexOf(v));
     const my = net.lobby?.members?.[net.id] || {};
-    const race = [`track=${r.track | 0}`, `laps=${r.laps | 0}`, `back=${r.dir === 'back' ? 1 : 0}`, `mirror=${r.mirror ? 1 : 0}`, `night=${r.night ? 1 : 0}`, `weather=${r.weather ? 1 : 0}`,
+    const race = [`type=${r.type === 'pursuit' ? 3 : 0}`, `track=${r.track | 0}`, `laps=${r.laps | 0}`, `back=${r.dir === 'back' ? 1 : 0}`, `mirror=${r.mirror ? 1 : 0}`, `night=${r.night ? 1 : 0}`, `weather=${r.weather ? 1 : 0}`,
       `cls=${pos(r.cls, ['A', 'B', 'C', 'any'])}`, `opp=${pos(r.opp, ['none', 'one', 'full'])}`, `skill=${pos(r.oppSkill, ['normal', 'aggressive'])}`,
       `aicar=${pos(r.oppCar, ['none', 'A', 'B', 'C']) || 1}`, `traffic=${r.traffic === 'on' ? 0 : 1}`,
       `abrake=${r.aBrake ? 1 : 0}`, `acoll=${r.aCollision ? 1 : 0}`, `atrac=${r.aTraction ? 1 : 0}`, `aline=${r.aLine ? 1 : 0}`, `anav=${r.aNav ? 1 : 0}`];
